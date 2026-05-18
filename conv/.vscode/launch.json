@@ -1,0 +1,20 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug mtb5conv",
+            "type": "node",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/index.ts",
+            "preLaunchTask": "npm: build",
+            "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+            "sourceMaps": true,
+            "console": "integratedTerminal",
+            "args": [
+                "--source", "${workspaceFolder}/../projects/mtbprojects/fp7by0vl",
+                "--dest", "${workspaceFolder}/../projects/cmakeprojects/fp7by0vl",
+                "--force"
+            ]
+        }
+    ]
+}

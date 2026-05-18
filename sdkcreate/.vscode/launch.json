@@ -1,0 +1,58 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Fetch: BSP filter",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/dist/index.js",
+      "args": ["--output", "./mtb-assets", "--bsp-file", "bsplist.json"],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Build",
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "sourceMaps": true,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Fetch: Force, BSP filter + create-json-desc",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/dist/index.js",
+      "args": [
+        "--force",
+        "--output", "../work/edgesdk",
+        "--bsp-file", "bsplist.json",
+        "--create-json-desc"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Build",
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "sourceMaps": true,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Fetch: BSP filter --force",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/dist/index.js",
+      "args": ["--output", "./mtb-assets", "--bsp-file", "bsplist.json", "--force"],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Build",
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "sourceMaps": true,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "create-json-desc only",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/dist/index.js",
+      "args": ["--output", "./mtb-assets", "--create-json-desc"],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Build",
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "sourceMaps": true,
+      "console": "integratedTerminal"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+[
+  {
+    "name": "KIT_PSE84_EVAL_EPC2",
+    "apps" : [
+      "mtb-example-psoc-edge-gfx-lvgl-demo"
+    ]
+  }
+]

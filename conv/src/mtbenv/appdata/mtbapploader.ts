@@ -1,0 +1,234 @@
+/*
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+import { ApplicationType, MTBAppInfo } from "./mtbappinfo";
+import * as path from 'path' ;
+import * as fs from 'fs' ;
+import { MTBUtils } from "../misc/mtbutils";
+import { MTBNames } from "../misc/mtbnames";
+import { MTBProjectInfo } from "./mtbprojinfo";
+import * as winston from 'winston';
+import { ModusToolboxEnvironment } from "../mtbenv/mtbenv";
+
+export class MTBAppLoader {
+    private app_ : MTBAppInfo ;
+    private toolsdir_ : string ;
+    private modusShellDir_? : string ;
+    private logger_ : winston.Logger ;
+
+    constructor(logger: winston.Logger, app: MTBAppInfo, toolsdir: string) {
+        this.app_ = app ;
+        this.toolsdir_ = toolsdir ;
+        this.logger_ = logger ;
+    }
+
+    public async load() : Promise<void> {
+        let ret = new Promise<void>((resolve, reject) => {
+            if (!this.toolsdir_) {
+                let msg = `loadapp: cannot load application - no tools directory located` ;
+                this.logger_.error(msg) ;
+                reject(new Error(msg)) ;
+            }
+            else {
+                if (!this.setupModusShell()) {
+                    let msg = `loadapp: cannot find 'modus-shell' in the tools directory '${this.toolsdir_}'` ;
+                    this.logger_.error(msg) ;
+                    reject(new Error(msg)) ;
+                } else {
+                    let mfile = this.findMakeFile() ;
+                    if (mfile === undefined) {
+                        let msg = `loadapp: cannot find makefile at the top of the application directory '${this.app_.appdir}' ` ;
+                        this.logger_.error(msg) ;
+                        reject(new Error(msg)) ;
+                    }
+                    else {
+                        MTBUtils.callGetAppInfo(this.logger_, this.toolsdir_, this.modusShellDir_!, this.app_.appdir)
+                            .then((vars) => {
+                                this.app_.setVars(vars) ;
+                                let err = this.app_.isValid() ;
+                                if (err) {
+                                    reject(err) ;
+                                }
+
+                                let type = vars.get(MTBNames.MTB_TYPE) ;
+                                if (type === MTBNames.MTB_TYPE_APPLICATION) {
+                                    this.loadApplication(vars)
+                                        .then(() => {
+                                            this.logger_.debug('Loading AppInfo Complete') ;
+                                            resolve() ;
+                                        })
+                                        .catch((err) => {
+                                            reject(err) ;
+                                        });
+                                }
+                                else if (type === MTBNames.MTB_TYPE_COMBINED) {
+                                    this.loadCombined(vars)
+                                        .then(() => {
+                                            resolve() ;
+                                        })
+                                        .catch((err) => {
+                                            reject(err) ;
+                                        });
+                                }
+                                else if (type === MTBNames.MTB_TYPE_PROJECT) {
+                                    let msg = `loadapp: the makefile in directory '${this.app_.appdir}' returned a type of 'PROJECT' which is not valid in the top level directory` ;
+                                    this.logger_.error(msg) ;
+                                    reject(new Error(msg)) ;
+                                }
+                                else {
+                                    let msg = `loadapp: the makefile in directory '${this.app_.appdir}' returns a type of ${type} which is not a valid value` ;
+                                    this.logger_.error(msg) ;
+                                    reject(new Error(msg)) ;
+                                }
+                            })
+                            .catch((err) => {
+                                reject(err) ;
+                            }) ;
+                    }
+                }
+            }
+        }) ;
+        return ret;
+    }
+
+    private setupModusShell() : boolean {
+        let ret = true ;
+
+        if (!this.modusShellDir_) {
+            this.modusShellDir_ = path.join(this.toolsdir_, 'modus-shell') ;
+            if (!fs.existsSync(this.modusShellDir_) || !fs.statSync(this.modusShellDir_).isDirectory()) {
+                this.modusShellDir_ = undefined ;
+                ret = false ;
+            }
+        }
+
+        return ret;
+    }
+
+    private loadCombined(vars: Map<string, string>) : Promise<void> {
+        let ret = new Promise<void>((resolve, reject) => {
+            this.app_.setType(ApplicationType.combined) ;
+            let projinfo = new MTBProjectInfo(this.app_, this.app_.appdir, vars) ;
+            this.processProject(projinfo)
+                .then(() => {
+                    this.app_.addProject(projinfo) ;
+                    resolve() ;
+                })
+                .catch((err) => {
+                    reject(err) ;
+                });
+        }) ;
+        return ret ;
+    }
+
+    private loadProject(projdir: string) : Promise<void> {
+        let ret = new Promise<void>((resolve, reject) => {
+            if (!this.setupModusShell()) {
+                let msg = `loadapp: cannot find 'modus-shell' in the tools directory '${this.toolsdir_}'` ;
+                this.logger_.error(msg) ;
+                reject(new Error(msg)) ;                
+            }
+
+            MTBUtils.callGetAppInfo(this.logger_, this.toolsdir_, this.modusShellDir_!, projdir)
+                .then((vars) => {
+                    let projinfo = new MTBProjectInfo(this.app_, projdir, vars) ;
+                    this.processProject(projinfo)
+                        .then(()=> {
+                            this.app_.addProject(projinfo) ;
+                            resolve() ;
+                        })
+                        .catch((err) => {
+                            reject(err) ;
+                        });
+                })
+                .catch((err) => {
+                    reject(err) ;
+                }) ;
+        }) ;
+        return ret;
+    }
+
+    private loadApplication(vars: Map<string, string>) : Promise<void> {
+        let ret = new Promise<void>((resolve, reject) => {
+            if (!vars.has(MTBNames.MTB_PROJECTS)) {
+                let msg = `directory ${this.app_.appdir} was of type 'APPLICATION' but did not return an MTB_PROJECTS value` ;
+                this.logger_.error(msg) ;
+                reject(new Error(msg)) ;
+            }
+            else {
+                this.app_.setType(ApplicationType.application) ;
+                let pall = [] ;
+                let projs = vars.get(MTBNames.MTB_PROJECTS)!.split(' ') ;
+                for(let proj of projs) {
+                    if (proj.trim().length > 0) {
+                        let projpath = path.join(this.app_.appdir, proj) ;
+                        if (fs.existsSync(projpath)) {
+                            let p = this.loadProject(projpath) ;
+                            pall.push(p) ;                        
+                        }
+                        else {
+                            this.logger_.warn(`project directory ${projpath} does not exist - ignored`) ;
+                        }
+                    }
+                }
+
+                Promise.all(pall)
+                    .then(() => {
+                        resolve() ;
+                    })
+                    .catch((err) => {
+                        reject(err) ;
+                    }) ;
+            }
+        }) ;
+        return ret ;
+    }    
+
+    private processProject(projinfo: MTBProjectInfo) : Promise<void> {
+        let ret = new Promise<void>((resolve, reject) => {
+            let err = projinfo.isValid() ;
+            if (err) {
+                reject(err) ;
+            }
+
+            projinfo.initialize(this.logger_)
+                .then(() => {
+                    resolve() ;
+                })
+                .catch((err) => {
+                    reject(err) ;
+                }) ;
+            
+            resolve() ;
+        }) ;
+
+        return ret;
+    }
+
+    private findMakeFile() : string | undefined {
+        let appdir = this.app_.appdir ;
+        let mfile = path.join(appdir, 'Makefile') ;
+        if (fs.existsSync(mfile)) {
+            return mfile ;
+        }
+
+        mfile = path.join(appdir, 'makefile') ;
+        if (fs.existsSync(mfile)) {
+            return mfile ;
+        }
+
+        return undefined ;
+    }
+}

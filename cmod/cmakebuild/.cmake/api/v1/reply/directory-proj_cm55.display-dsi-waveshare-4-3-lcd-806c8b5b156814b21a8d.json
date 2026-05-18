@@ -1,0 +1,19 @@
+{
+	"backtraceGraph" : 
+	{
+		"commands" : [],
+		"files" : [],
+		"nodes" : []
+	},
+	"codemodelVersion" : 
+	{
+		"major" : 2,
+		"minor" : 9
+	},
+	"installers" : [],
+	"paths" : 
+	{
+		"build" : "proj_cm55/display-dsi-waveshare-4-3-lcd",
+		"source" : "assets/display-dsi-waveshare-4-3-lcd"
+	}
+}

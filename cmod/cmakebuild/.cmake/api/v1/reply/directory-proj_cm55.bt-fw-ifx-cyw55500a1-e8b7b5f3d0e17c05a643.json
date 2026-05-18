@@ -1,0 +1,19 @@
+{
+	"backtraceGraph" : 
+	{
+		"commands" : [],
+		"files" : [],
+		"nodes" : []
+	},
+	"codemodelVersion" : 
+	{
+		"major" : 2,
+		"minor" : 9
+	},
+	"installers" : [],
+	"paths" : 
+	{
+		"build" : "proj_cm55/bt-fw-ifx-cyw55500a1",
+		"source" : "assets/bt-fw-ifx-cyw55500a1"
+	}
+}

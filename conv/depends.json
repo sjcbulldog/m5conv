@@ -1,0 +1,307 @@
+[
+    {
+        "name" : "async-transfer",
+        "imports" : [
+            "core-lib",
+            "mtb-dsl-pse8xxgp",
+            "cmsis",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ],
+        "exports" : [
+            "include"
+        ]
+    },
+    {
+        "name" : "core-lib",
+        "exports" : [
+            "include"
+        ],
+        "imports" : []
+    },
+    {
+        "name" : "cmsis",
+        "exports" : [
+            "Core/Include",
+            "Core/Include/m-profile"
+        ],
+        "imports" : []
+    },
+    {
+        "name" : "clib-support",
+        "exports" : [
+            "include",
+            "source/TOOLCHAIN_IAR",
+            "source/TOOLCHAIN_ARM"
+        ],
+        "internal" : [
+            "source/TOOLCHAIN_ARM",
+            "source/TOOLCHAIN_GCC_ARM",
+            "source/TOOLCHAIN_IAR",
+            "source/TOOLCHAIN_LLVM_ARM"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "abstraction-rtos",
+            "freertos",
+            "mtb-srf",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "mtb-dsl-pse8xxgp",
+        "exports" : [
+            "pdl/drivers/include",
+            "pdl/drivers/third_party/COMPONENT_GFXSS",
+            "pdl/drivers/third_party/COMPONENT_GFXSS/vsi/dcnano8000/include",            
+            "pdl/drivers/third_party/COMPONENT_GFXSS/vsi/dcnano8000/DCUser",                  
+            "pdl/drivers/third_party/COMPONENT_GFXSS/vsi/dcnano8000/DCKernel",               
+            "pdl/drivers/third_party/COMPONENT_GFXSS/vsi/dcnano8000/DCKernel/hardware/8000Nano",   
+            "pdl/drivers/third_party/COMPONENT_GFXSS/vsi/gcnano/inc/",                        
+            "pdl/devices/include",
+            "pdl/devices/include/ip",
+            "hal/include"
+        ],
+        "imports" : [
+            "clib-support",
+            "async-transfer",
+            "core-lib",
+            "cmsis",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ],
+        "includes" : [
+            "device-utils/syspm/include",
+            "pdl/drivers/third_party/ethernet/include",
+            "nnkernel/COMPONENT_CM33/include",
+            "pdl/drivers/third_party/COMPONENT_GFXSS/vsi/dcnano8000/DCUser/rtos",
+            "pdl/drivers/third_party/COMPONENT_GFXSS/vsi/dcnano8000/DCKernel/rtos",
+            "pdl/drivers/third_party/COMPONENT_GFXSS/vsi/gcnano/VGLiteKernel/rtos",
+            "pdl/drivers/third_party/COMPONENT_GFXSS/vsi/gcnano/VGLiteKernel"
+        ]
+    },
+    {
+        "name" : "abstraction-rtos",
+        "exports" : [
+            "include",
+            "include/COMPONENT_FREERTOS",
+            "include/COMPONENT_THREADX",
+            "include/COMPONENT_RTX"
+        ],
+        "imports" : [
+            "clib-support",
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "async-transfer",
+            "mtb-ipc",
+            {
+                "component" : "FREERTOS",
+                "name" : "freertos"
+            },
+            "***BSP***",                
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ],
+        "includes" : [
+            "include",
+            "include/COMPONENT_FREERTOS",
+            "include/COMPONENT_THREADX",
+            "include/COMPONENT_RTX"
+        ]
+    },
+    {
+        "name" : "freertos",
+        "exports" : [
+            "Source/include",
+            "Source/portable/COMPONENT_CM0/TOOLCHAIN_GCC_ARM",
+            "Source/portable/COMPONENT_CM4/TOOLCHAIN_GCC_ARM",
+            "Source/portable/COMPONENT_CM7/TOOLCHAIN_GCC_ARM",
+            "Source/portable/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/COMPONENT_FREERTOS_NTZ",
+            "Source/portable/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/COMPONENT_FREERTOS_TZ",            
+            "Source/portable/COMPONENT_CM55/TOOLCHAIN_GCC_ARM",
+            "Source/portable/COMPONENT_CM0/TOOLCHAIN_IAR",
+            "Source/portable/COMPONENT_CM4/TOOLCHAIN_IAR",
+            "Source/portable/COMPONENT_CM7/TOOLCHAIN_IAR",
+            "Source/portable/COMPONENT_CM33/TOOLCHAIN_IAR/COMPONENT_FREERTOS_NTZ",
+            "Source/portable/COMPONENT_CM33/TOOLCHAIN_IAR/COMPONENT_FREERTOS_TZ",            
+            "Source/portable/COMPONENT_CM55/TOOLCHAIN_IAR"
+        ],
+        "imports" : [
+            "clib-support",
+            "core-lib",
+            "mtb-dsl-pse8xxgp",            
+            "cmsis",
+            "mtb-srf",
+            "***PROJECT***",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ]
+    },
+    {
+        "name" : "mtb-srf",
+        "exports" : [
+            "include",
+            "include/COMPONENT_NON_SECURE_DEVICE",
+            "include/COMPONENT_NON_SECURE_DEVICE/COMPONENT_MW_MTB_IPC"
+        ],
+        "imports" : [
+            "clib-support",            
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",            
+            "async-transfer",
+            "mtb-ipc",
+            "abstraction-rtos",
+            "freertos",
+            "***PROJECT***",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ]
+    },
+    {
+        "name" : "mtb-ipc",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "clib-support",
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "async-transfer",
+            "abstraction-rtos",
+            "freertos",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "se-rt-services-utils",
+        "exports" : [
+            "."
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "***BSP***"
+        ]
+    },
+    {
+        "name" : "display-dsi-waveshare-4-3-lcd",
+        "exports" : [
+            ".",
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "mtb-dsl-pse8xxgp",
+            "cmsis",
+            "mtb-srf",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"            
+        ]
+    },
+    {
+        "name" : "display-dsi-waveshare-7-0-lcd-c",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "mtb-dsl-pse8xxgp",
+            "cmsis",
+            "mtb-srf",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"            
+        ]
+    },
+    {
+        "name" : "display-tft-ek79007ad3",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "mtb-dsl-pse8xxgp",
+            "cmsis",
+            "mtb-srf",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"            
+        ]
+    },
+    {
+        "name" : "retarget-io",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "abstraction-rtos",
+            "core-lib",
+            "cmsis",
+            "freertos",            
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "lvgl",
+        "exports" : [
+            ".",
+            "demos/music/assets",
+            "src/draw",
+            "src/draw/sw",
+            "src/draw/vg_lite",
+            "src/indev",
+            "src/core"
+        ],
+        "internal" : [
+            "demos/music"
+        ],
+        "imports" : [
+            "clib-support",
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "touch-ctp-ft5406",
+        "exports" : [
+            "include",
+            "."
+        ],
+        "imports" : [
+            "core-lib",
+            "mtb-dsl-pse8xxgp",
+            "cmsis",
+            "mtb-srf",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    }
+]

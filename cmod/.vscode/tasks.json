@@ -1,0 +1,39 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "build"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": ["$tsc"],
+      "presentation": {
+        "reveal": "silent",
+        "clear": true
+      }
+    },
+    {
+      "label": "watch",
+      "type": "shell",
+      "command": "npx",
+      "args": ["tsc", "--watch"],
+      "isBackground": true,
+      "group": "build",
+      "problemMatcher": ["$tsc-watch"],
+      "presentation": {
+        "reveal": "always"
+      }
+    },
+    {
+      "label": "clean",
+      "type": "shell",
+      "command": "node",
+      "args": ["-e", "require('fs').rmSync('dist',{recursive:true,force:true})"],
+      "problemMatcher": []
+    }
+  ]
+}
