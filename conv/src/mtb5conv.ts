@@ -368,12 +368,16 @@ export class MTB5Converter {
             } else {
                 this.logger_.info(`  defines files: none found under ${path.join(srcProjDir, 'build')}`) ;
             }
+            // Exclude any COMPONENT_* defines already handled by the components mechanism.
+            const componentDefineNames = new Set(
+                components.map(c => `COMPONENT_${c.replace(/-/g, '_')}`)
+            ) ;
             const filterDefines = (defs: string[]) => defs.filter(d => {
                 const name = d.split('=')[0] ;
                 return !name.startsWith('COMPONENT_') && !componentDefineNames.has(name) ;
             }) ;
-            const debugDefines   = filterDefines(defsByConfig.debug) ;
-            const releaseDefines = filterDefines(defsByConfig.release) ;
+            const debugDefines   = filterDefines(debugDefinesRaw) ;
+            const releaseDefines = filterDefines(releaseDefinesRaw) ;
 
             generateProjectCMakeLists(destProjDir, projName, sources, assetSubs, projectIncludeDirs, bspName, components, flagsByToolchain, debugDefines, releaseDefines, dependsDB) ;
             this.logger_.info(`Generated CMakeLists.txt for project '${projName}'`) ;
@@ -388,10 +392,20 @@ export class MTB5Converter {
     // with each successive toolchain run, so we read and store the flags immediately
     // after each toolchain's Debug+Release pair.
     //
+    // .defines files are read immediately after the first successful codegen run for each
+    // configuration.  This is required for Model 2 (flat build/ layout) where successive
+    // codegen runs overwrite the same build/.defines file.
+    //
     // Toolchains whose codegen runs both fail are omitted from the result so the
     // generated CMakeLists.txt only contains entries for toolchains that were available.
     //
-    private async runMakeCodegenForProject(srcProjDir: string) : Promise<ProjectFlagsByToolchain> {
+    private async runMakeCodegenForProject(srcProjDir: string) : Promise<{
+        flags: ProjectFlagsByToolchain ;
+        debugDefinesRaw: string[] ;
+        releaseDefinesRaw: string[] ;
+        debugDefinesFile?: string ;
+        releaseDefinesFile?: string ;
+    }> {
         const ALL_TOOLCHAINS = ['GCC_ARM', 'IAR', 'LLVM_ARM', 'ARM'] as const ;
         type Toolchain = typeof ALL_TOOLCHAINS[number] ;
         const targetToToolchain: Record<string, Toolchain> = {
@@ -409,16 +423,23 @@ export class MTB5Converter {
         const CONFIGS    = ['Debug', 'Release'] as const ;
         const result: ProjectFlagsByToolchain = {} ;
 
+        // Defines are toolchain-independent; capture them once per config from
+        // the first successful codegen run for that config.
+        let debugDefinesRaw:   string[] | undefined ;
+        let releaseDefinesRaw: string[] | undefined ;
+        let debugDefinesFile:   string | undefined ;
+        let releaseDefinesFile: string | undefined ;
+
         const toolsDir = this.env_.toolsDir ;
         if (!toolsDir) {
             this.logger_.warn('  codegen: no tools directory located — skipping make codegen') ;
-            return result ;
+            return { flags: result, debugDefinesRaw: [], releaseDefinesRaw: [] } ;
         }
 
         const modusShellDir = path.join(toolsDir, 'modus-shell') ;
         if (!fs.existsSync(modusShellDir)) {
             this.logger_.warn(`  codegen: modus-shell not found at '${modusShellDir}' — skipping make codegen`) ;
-            return result ;
+            return { flags: result, debugDefinesRaw: [], releaseDefinesRaw: [] } ;
         }
 
         // IAR passes -S (preprocess-only) and --dependencies=m <file> to the
@@ -509,12 +530,24 @@ export class MTB5Converter {
                             this.logger_.debug(`  output: ${firstLines.join(' | ')}`) ;
                         }
                     } else {
-                        // Collect flags immediately after each successful codegen so that a
-                        // subsequent config's run cannot overwrite the files we need to read.
+                        // Collect flags and defines immediately after each successful codegen so
+                        // that a subsequent run cannot overwrite the files we need to read.
+                        // This is critical for Model 2 (flat build/ layout) where all configs
+                        // share the same output directory.
                         if (config === 'Debug') {
-                            debugFlags   = collectFlagsForConfig(toolchain, 'Debug') ;
+                            debugFlags = collectFlagsForConfig(toolchain, 'Debug') ;
+                            if (debugDefinesRaw === undefined) {
+                                const d = readProjectDefinesForConfig(srcProjDir, 'Debug') ;
+                                debugDefinesRaw = d.defines ;
+                                debugDefinesFile = d.filePath ;
+                            }
                         } else {
                             releaseFlags = collectFlagsForConfig(toolchain, 'Release') ;
+                            if (releaseDefinesRaw === undefined) {
+                                const d = readProjectDefinesForConfig(srcProjDir, 'Release') ;
+                                releaseDefinesRaw = d.defines ;
+                                releaseDefinesFile = d.filePath ;
+                            }
                         }
                     }
                 } catch (err: any) {
@@ -535,7 +568,13 @@ export class MTB5Converter {
             }
         }
 
-        return result ;
+        return {
+            flags:              result,
+            debugDefinesRaw:    debugDefinesRaw   ?? [],
+            releaseDefinesRaw:  releaseDefinesRaw ?? [],
+            debugDefinesFile,
+            releaseDefinesFile,
+        } ;
     }
 
     private generateTopLevel() : void {
