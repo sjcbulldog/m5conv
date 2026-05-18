@@ -1656,6 +1656,11 @@ export function generateProjectCMakeLists(
     const lines: string[] = [] ;
     lines.push('cmake_minimum_required(VERSION 3.16)') ;
     lines.push(`project(${projectName} LANGUAGES ${languages})`) ;
+    lines.push('') ;
+    lines.push('# Force Ninja to use response files for all compile and link commands to') ;
+    lines.push('# avoid exceeding the Windows command-line length limit.') ;
+    lines.push('set(CMAKE_NINJA_FORCE_RESPONSE_FILE ON CACHE BOOL "" FORCE)') ;
+    lines.push('') ;
 
     // Emit per-toolchain add_compile_options / add_link_options blocks derived
     // from running 'make codegen TOOLCHAIN=<t> CONFIG=<c>' for each combination.
@@ -2294,14 +2299,12 @@ export function generateGccToolchainCMake(destDir: string) : void {
     lines.push('set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)') ;
     lines.push('set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)') ;
     lines.push('') ;
-    lines.push('# Use response files for include paths and defines to avoid exceeding the') ;
-    lines.push('# Windows command-line length limit when Ninja invokes the compiler.') ;
-    lines.push('set(CMAKE_C_USE_RESPONSE_FILE_FOR_INCLUDES   1)') ;
-    lines.push('set(CMAKE_CXX_USE_RESPONSE_FILE_FOR_INCLUDES 1)') ;
-    lines.push('set(CMAKE_ASM_USE_RESPONSE_FILE_FOR_INCLUDES 1)') ;
-    lines.push('set(CMAKE_C_USE_RESPONSE_FILE_FOR_DEFINES    1)') ;
-    lines.push('set(CMAKE_CXX_USE_RESPONSE_FILE_FOR_DEFINES  1)') ;
-    lines.push('set(CMAKE_ASM_USE_RESPONSE_FILE_FOR_DEFINES  1)') ;
+    lines.push('') ;
+    lines.push('# Remove compile-only flags (-I, -D) from the linker command line.') ;
+    lines.push('# CMake\'s default CXX link rule includes <FLAGS>, which carries all') ;
+    lines.push('# add_compile_options values and makes the link command extremely long.') ;
+    lines.push('set(CMAKE_CXX_LINK_EXECUTABLE') ;
+    lines.push('    "<CMAKE_CXX_COMPILER> <CMAKE_CXX_LINK_FLAGS> <LINK_FLAGS> <OBJECTS> -o <TARGET> <LINK_LIBRARIES>")') ;
     lines.push('') ;
 
     const toolchainsDir = path.join(destDir, 'toolchains') ;
