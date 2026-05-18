@@ -303,5 +303,22 @@
             "***BSP***/config/GeneratedSource",
             "***PROJECT***"
         ]
+    },
+    {
+        "name" : "ifx-mcuboot-pse84.mtb",
+        "exports" : [
+            "include",
+            "bootutil/include"
+        ],
+        "imports" : [
+        ]
+    },
+    {
+        "name" : "ifx-mbedtls",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+        ]
     }
 ]

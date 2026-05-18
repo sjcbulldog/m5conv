@@ -4,22 +4,45 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { CMakeFileApiReader } from "./cmake/index.js";
 import { IarGenerator } from "./iar/index.js";
+import { EclipseGenerator } from "./eclipse/index.js";
+
+type Target = 'iar' | 'eclipse';
+
+const VALID_TARGETS: Target[] = ['iar', 'eclipse'];
 
 interface CliArgs {
   sourceDir: string;
   buildDir: string;
   destDir: string;
   force: boolean;
+  target: Target;
 }
 
 function parseArgs(argv: string[]): CliArgs {
   const positional: string[] = [];
   let force = false;
-  for (const a of argv) {
-    if (a === "--force" || a === "-f") force = true;
-    else if (a === "-h" || a === "--help") {
+  let target: Target | undefined;
+
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--force" || a === "-f") {
+      force = true;
+    } else if (a === "-h" || a === "--help") {
       usage();
       process.exit(0);
+    } else if (a === "--target") {
+      const val = argv[++i];
+      if (!val) {
+        console.error("--target requires a value");
+        usage();
+        process.exit(1);
+      }
+      if (!(VALID_TARGETS as string[]).includes(val)) {
+        console.error(`Unknown target: ${val}. Valid targets: ${VALID_TARGETS.join(', ')}`);
+        usage();
+        process.exit(1);
+      }
+      target = val as Target;
     } else if (a.startsWith("-")) {
       console.error(`Unknown option: ${a}`);
       usage();
@@ -28,27 +51,37 @@ function parseArgs(argv: string[]): CliArgs {
       positional.push(a);
     }
   }
+
+  if (!target) {
+    console.error("--target is required");
+    usage();
+    process.exit(1);
+  }
+
   if (positional.length !== 3) {
     usage();
     process.exit(1);
   }
+
   return {
     sourceDir: positional[0],
     buildDir: positional[1],
     destDir: positional[2],
     force,
+    target,
   };
 }
 
 function usage(): void {
   console.error(
-    "Usage: cmod [--force] <cmake-source-dir> <cmake-build-dir> <iar-project-dir>",
+    "Usage: cmod --target <TARGET> [--force] <cmake-source-dir> <cmake-build-dir> <output-dir>",
   );
   console.error("");
+  console.error(`  --target <TARGET>     IDE target to generate for: ${VALID_TARGETS.join(', ')}`);
   console.error("  <cmake-source-dir>    root of the CMake project's source tree");
   console.error("  <cmake-build-dir>     CMake build directory to create (must not exist or be empty)");
-  console.error("  <iar-project-dir>     directory to populate with the IAR workspace (must not exist or be empty)");
-  console.error("  --force, -f           delete <cmake-build-dir> and <iar-project-dir> first if they exist");
+  console.error("  <output-dir>          directory to populate with IDE project files (must not exist or be empty)");
+  console.error("  --force, -f           delete <cmake-build-dir> and <output-dir> first if they exist");
 }
 
 async function isEmpty(dir: string): Promise<boolean> {
@@ -117,22 +150,28 @@ async function main(): Promise<void> {
   const buildDir = path.resolve(args.buildDir);
   const destDir = path.resolve(args.destDir);
 
+  const toolchainFiles: Record<Target, string> = {
+    iar: path.join(sourceDir, "toolchains", "iar.cmake"),
+    eclipse: path.join(sourceDir, "toolchains", "gcc.cmake"),
+  };
+  const toolchainFile = toolchainFiles[args.target];
+
   console.log(`Source dir:  ${sourceDir}`);
   console.log(`Build dir:   ${buildDir}`);
-  console.log(`IAR dir:     ${destDir}`);
+  console.log(`Output dir:  ${destDir}`);
+  console.log(`Target:      ${args.target}`);
 
   if (!(await exists(sourceDir))) {
     throw new Error(`CMake source directory does not exist: ${sourceDir}`);
   }
 
-  const toolchainFile = path.join(sourceDir, "toolchains", "iar.cmake");
   console.log(`Toolchain file: ${toolchainFile}`);
   if (!(await exists(toolchainFile))) {
     throw new Error(`Toolchain file does not exist: ${toolchainFile}`);
   }
 
   await prepareEmptyDir(buildDir, args.force, "Build directory");
-  await prepareEmptyDir(destDir, args.force, "IAR project directory");
+  await prepareEmptyDir(destDir, args.force, "Output directory");
 
   const queryDir = path.join(buildDir, ".cmake", "api", "v1", "query");
   console.log(`Creating CMake File API query dir: ${queryDir}`);
@@ -170,17 +209,20 @@ async function main(): Promise<void> {
     console.log(`    target: ${t.name} (${t.type})`);
   }
 
-  console.log(`Generating IAR workspace in ${destDir} ...`);
-  const generator = new IarGenerator(model, {
-    sourceDir,
-    destDir,
-  });
-  console.log("  Running IarGenerator.generate() ...");
-  const result = await generator.generate();
-
-  console.log(`Done. Wrote workspace: ${path.resolve(result.workspaceFile)}`);
-  console.log(`  Projects (${result.projects.length}):`);
-  for (const p of result.projects) console.log(`    - ${p}`);
+  if (args.target === 'iar') {
+    console.log(`Generating IAR workspace in ${destDir} ...`);
+    const generator = new IarGenerator(model, { sourceDir, destDir });
+    const result = await generator.generate();
+    console.log(`Done. Wrote workspace: ${path.resolve(result.workspaceFile)}`);
+    console.log(`  Projects (${result.projects.length}):`);
+    for (const p of result.projects) console.log(`    - ${p}`);
+  } else if (args.target === 'eclipse') {
+    console.log(`Generating Eclipse projects in ${destDir} ...`);
+    const generator = new EclipseGenerator(model, { sourceDir, destDir });
+    const files = await generator.generate();
+    console.log(`Done. Wrote ${files.length} Eclipse project file(s):`);
+    for (const f of files) console.log(`    - ${f}`);
+  }
 }
 
 main().catch((err) => {

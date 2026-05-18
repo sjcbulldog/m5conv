@@ -11,8 +11,9 @@
             "sourceMaps": true,
             "console": "integratedTerminal",
             "args": [
-                "--source", "${workspaceFolder}/../projects/mtbprojects/fp7by0vl",
-                "--dest", "${workspaceFolder}/../projects/cmakeprojects/fp7by0vl",
+                "--target", "gcc",
+                "--source", "${workspaceFolder}/../projects/ble/PSOC_Edge_Bluetooth_A2DP_Sink",
+                "--dest", "${workspaceFolder}/../projects/ble/PSOC_Edge_Bluetooth_A2DP_Sink5",
                 "--force"
             ]
         }

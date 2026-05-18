@@ -10,9 +10,10 @@
       "program": "${workspaceFolder}/src/index.ts",
       "args" : [
         "--force", 
+        "--target", "eclipse",
         "../projects/graphics5", 
         "../projects/cmakebuild", 
-        "../projects/iarproj"
+        "../projects/eclipseproj"
       ],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
