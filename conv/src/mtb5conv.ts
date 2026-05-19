@@ -1,5 +1,5 @@
 import { ModusToolboxEnvironment, MTBLoadFlags } from "./mtbenv";
-import { collectSources, collectHeaders, generateObjectLibraryCMakeLists, generateHeaderOnlyCMakeLists, generateProjectCMakeLists, generateTopLevelCMakeLists, generateGccToolchainCMake, generateIarToolchainCMake, generateLlvmToolchainCMake, generateArmToolchainCMake, generateBspCMakeInclude, AssetSubdirectory, loadDependsDB, resolveIncludeDirs, resolveAssetExports, resolveAssetInternals, hasActiveSources, readProjectDefinesByConfig, readProjectDefinesForConfig, readProjectFlagsByConfig, readProjectFlagsForConfig, mergeProjectFlagsByConfig, ProjectFlagsByConfig, ProjectFlagsByToolchain, DependsEntry, ConditionalIncludeDir, processSignCombineJson, SignCombineInfo } from './cmakeutil';
+import { collectSources, collectHeaders, generateObjectLibraryCMakeLists, generateHeaderOnlyCMakeLists, generateProjectCMakeLists, generateTopLevelCMakeLists, generateGccToolchainCMake, generateIarToolchainCMake, generateLlvmToolchainCMake, generateArmToolchainCMake, generateBspCMakeInclude, AssetSubdirectory, loadDependsDB, resolveIncludeDirs, resolveAssetExports, resolveAssetInternals, hasActiveSources, readProjectDefinesByConfig, readProjectDefinesForConfig, fixDefineFilePaths, readProjectFlagsByConfig, readProjectFlagsForConfig, mergeProjectFlagsByConfig, ProjectFlagsByConfig, ProjectFlagsByToolchain, DependsEntry, ConditionalIncludeDir, processSignCombineJson, SignCombineInfo } from './cmakeutil';
 import { MTBUtils } from './mtbenv/misc/mtbutils';
 import * as winston from 'winston';
 import * as fs from 'fs';
@@ -11,6 +11,7 @@ export class MTB5Converter {
     private env_: ModusToolboxEnvironment ;
     private logger_ : winston.Logger ;
     public forceDeleteDest : boolean = false ;
+    public cmakeOnly : boolean = false ;
     public bspName : string | undefined ;
     public signCombinePath : string | undefined ;
     public setOverrides : Map<string, string> = new Map() ;
@@ -43,7 +44,11 @@ export class MTB5Converter {
     }
 
     public async convert() : Promise<void> {
-        if (fs.existsSync(this.dest_)) {
+        if (this.cmakeOnly) {
+            if (!fs.existsSync(this.dest_)) {
+                throw new Error(`Destination directory does not exist: ${this.dest_} (--cmake-only requires an existing destination)`) ;
+            }
+        } else if (fs.existsSync(this.dest_)) {
             if (this.forceDeleteDest) {
                 this.logger_.info(`Removing existing destination directory: ${this.dest_}`) ;
                 try {
@@ -76,18 +81,25 @@ export class MTB5Converter {
         }
 
         const destBspsDir = path.join(this.dest_, 'bsps') ;
-        fs.mkdirSync(destBspsDir, { recursive: true }) ;
+        if (!this.cmakeOnly) {
+            fs.mkdirSync(destBspsDir, { recursive: true }) ;
+        }
 
         const entries = fs.readdirSync(srcBspsDir, { withFileTypes: true }) ;
         for (const entry of entries) {
             if (entry.isDirectory() && entry.name.startsWith('TARGET_')) {
                 const srcTarget = path.join(srcBspsDir, entry.name) ;
                 const destTarget = path.join(destBspsDir, entry.name) ;
-                this.logger_.info(`Copying BSP directory: ${entry.name}`) ;
-                try {
-                    fs.cpSync(srcTarget, destTarget, { recursive: true }) ;
-                } catch (err) {
-                    this.logger_.warn(`Failed to copy BSP directory '${entry.name}': ${err}`) ;
+                if (!this.cmakeOnly) {
+                    this.logger_.info(`Copying BSP directory: ${entry.name}`) ;
+                    try {
+                        fs.cpSync(srcTarget, destTarget, { recursive: true }) ;
+                    } catch (err) {
+                        this.logger_.warn(`Failed to copy BSP directory '${entry.name}': ${err}`) ;
+                        continue ;
+                    }
+                } else if (!fs.existsSync(destTarget)) {
+                    this.logger_.warn(`BSP directory '${entry.name}' not found in destination - skipping`) ;
                     continue ;
                 }
 
@@ -127,38 +139,47 @@ export class MTB5Converter {
                 }
 
                 const assetName = req.name() ;
+                if (assetName === 'device-db') {
+                    continue ;
+                }
+
                 if (copiedAssets.has(assetName)) {
                     continue ;
                 }
 
                 const srcPath = req.fullPath(dirList) ;
-                if (!fs.existsSync(srcPath)) {
-                    this.logger_.warn(`Asset '${assetName}' not found at '${srcPath}' - skipping`) ;
-                    continue ;
-                }
-
-                if (!fs.existsSync(destAssetsDir)) {
-                    fs.mkdirSync(destAssetsDir, { recursive: true }) ;
-                }
-
                 const destPath = path.join(destAssetsDir, assetName) ;
-                this.logger_.info(`Copying asset '${assetName}' from '${srcPath}'`) ;
-                try {
-                    fs.cpSync(srcPath, destPath, { recursive: true }) ;
-                } catch (err) {
-                    this.logger_.warn(`Failed to copy asset '${assetName}' from '${srcPath}': ${err}`) ;
-                    continue ;
-                }
-
-                // Remove .git directory if present
-                const gitDir = path.join(destPath, '.git') ;
-                if (fs.existsSync(gitDir)) {
-                    this.logger_.info(`Removing .git directory from asset '${assetName}'`) ;
-                    try {
-                        fs.rmSync(gitDir, { recursive: true, force: true }) ;
-                    } catch (err) {
-                        this.logger_.warn(`Failed to remove .git directory from asset '${assetName}': ${err}`) ;
+                if (!this.cmakeOnly) {
+                    if (!fs.existsSync(srcPath)) {
+                        this.logger_.warn(`Asset '${assetName}' not found at '${srcPath}' - skipping`) ;
+                        continue ;
                     }
+
+                    if (!fs.existsSync(destAssetsDir)) {
+                        fs.mkdirSync(destAssetsDir, { recursive: true }) ;
+                    }
+
+                    this.logger_.info(`Copying asset '${assetName}' from '${srcPath}'`) ;
+                    try {
+                        fs.cpSync(srcPath, destPath, { recursive: true }) ;
+                    } catch (err) {
+                        this.logger_.warn(`Failed to copy asset '${assetName}' from '${srcPath}': ${err}`) ;
+                        continue ;
+                    }
+
+                    // Remove .git directory if present
+                    const gitDir = path.join(destPath, '.git') ;
+                    if (fs.existsSync(gitDir)) {
+                        this.logger_.info(`Removing .git directory from asset '${assetName}'`) ;
+                        try {
+                            fs.rmSync(gitDir, { recursive: true, force: true }) ;
+                        } catch (err) {
+                            this.logger_.warn(`Failed to remove .git directory from asset '${assetName}': ${err}`) ;
+                        }
+                    }
+                } else if (!fs.existsSync(destPath)) {
+                    this.logger_.warn(`Asset '${assetName}' not found in destination - skipping`) ;
+                    continue ;
                 }
 
                 // Generate CMakeLists.txt for the asset if it has source files.
@@ -168,8 +189,11 @@ export class MTB5Converter {
                 const assetIgnorePaths = project.ignorePath()
                     .filter(ip => path.normalize(ip).startsWith(normSrc))
                     .map(ip => path.join(destPath, path.relative(srcPath, ip))) ;
-                if (assetIgnorePaths.length > 0) {
-                    this.logger_.info(`  ignore paths for '${assetName}': ${assetIgnorePaths.join(', ')}`) ;
+                const dependsEntry = dependsDB.find(e => e.name === assetName) ;
+                if (dependsEntry?.excludes) {
+                    for (const excl of dependsEntry.excludes) {
+                        assetIgnorePaths.push(path.join(destPath, excl)) ;
+                    }
                 }
                 const sources = collectSources(destPath, destPath, [], assetIgnorePaths) ;
                 const bspDir = project.bspName ? '${BSP_DIR}' : undefined ;
@@ -239,15 +263,17 @@ export class MTB5Converter {
             const srcProjDir = project.path ;
             const destProjDir = path.join(this.dest_, projName) ;
 
-            this.logger_.info(`Copying project '${projName}' from '${srcProjDir}'`) ;
-            fs.cpSync(srcProjDir, destProjDir, { recursive: true }) ;
+            if (!this.cmakeOnly) {
+                this.logger_.info(`Copying project '${projName}' from '${srcProjDir}'`) ;
+                fs.cpSync(srcProjDir, destProjDir, { recursive: true }) ;
 
-            // Remove makefiles
-            for (const mf of ['Makefile', 'makefile']) {
-                const mfPath = path.join(destProjDir, mf) ;
-                if (fs.existsSync(mfPath)) {
-                    this.logger_.info(`Removing ${mf} from project '${projName}'`) ;
-                    fs.unlinkSync(mfPath) ;
+                // Remove makefiles
+                for (const mf of ['Makefile', 'makefile']) {
+                    const mfPath = path.join(destProjDir, mf) ;
+                    if (fs.existsSync(mfPath)) {
+                        this.logger_.info(`Removing ${mf} from project '${projName}'`) ;
+                        fs.unlinkSync(mfPath) ;
+                    }
                 }
             }
 
@@ -288,6 +314,12 @@ export class MTB5Converter {
                     const assetIgnorePaths = project.ignorePath()
                         .filter(ip => path.normalize(ip).startsWith(normSrcAsset))
                         .map(ip => path.join(destAssetPath, path.relative(srcAssetPath, ip))) ;
+                    const dependsEntryForAsset = dependsDB.find(e => e.name === assetName) ;
+                    if (dependsEntryForAsset?.excludes) {
+                        for (const excl of dependsEntryForAsset.excludes) {
+                            assetIgnorePaths.push(path.join(destAssetPath, excl)) ;
+                        }
+                    }
 
                     // Only include assets that have source files active for this project's components.
                     // Apply the same ignore paths used during CMakeLists generation so that assets
@@ -538,14 +570,14 @@ export class MTB5Converter {
                             debugFlags = collectFlagsForConfig(toolchain, 'Debug') ;
                             if (debugDefinesRaw === undefined) {
                                 const d = readProjectDefinesForConfig(srcProjDir, 'Debug') ;
-                                debugDefinesRaw = d.defines ;
+                                debugDefinesRaw = fixDefineFilePaths(d.defines, srcProjDir) ;
                                 debugDefinesFile = d.filePath ;
                             }
                         } else {
                             releaseFlags = collectFlagsForConfig(toolchain, 'Release') ;
                             if (releaseDefinesRaw === undefined) {
                                 const d = readProjectDefinesForConfig(srcProjDir, 'Release') ;
-                                releaseDefinesRaw = d.defines ;
+                                releaseDefinesRaw = fixDefineFilePaths(d.defines, srcProjDir) ;
                                 releaseDefinesFile = d.filePath ;
                             }
                         }

@@ -124,17 +124,21 @@
         "name" : "freertos",
         "exports" : [
             "Source/include",
+            "Source/portable/COMPONENT_CM0",
+            "Source/portable/COMPONENT_CM33",
+            "Source/portable/COMPONENT_CM4",
+            "Source/portable/COMPONENT_CM7",
             "Source/portable/COMPONENT_CM0/TOOLCHAIN_GCC_ARM",
             "Source/portable/COMPONENT_CM4/TOOLCHAIN_GCC_ARM",
             "Source/portable/COMPONENT_CM7/TOOLCHAIN_GCC_ARM",
             "Source/portable/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/COMPONENT_FREERTOS_NTZ",
-            "Source/portable/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/COMPONENT_FREERTOS_TZ",            
+            "Source/portable/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/COMPONENT_FREERTOS_TZ",
             "Source/portable/COMPONENT_CM55/TOOLCHAIN_GCC_ARM",
             "Source/portable/COMPONENT_CM0/TOOLCHAIN_IAR",
             "Source/portable/COMPONENT_CM4/TOOLCHAIN_IAR",
             "Source/portable/COMPONENT_CM7/TOOLCHAIN_IAR",
             "Source/portable/COMPONENT_CM33/TOOLCHAIN_IAR/COMPONENT_FREERTOS_NTZ",
-            "Source/portable/COMPONENT_CM33/TOOLCHAIN_IAR/COMPONENT_FREERTOS_TZ",            
+            "Source/portable/COMPONENT_CM33/TOOLCHAIN_IAR/COMPONENT_FREERTOS_TZ",
             "Source/portable/COMPONENT_CM55/TOOLCHAIN_IAR"
         ],
         "imports" : [
@@ -316,9 +320,295 @@
     {
         "name" : "ifx-mbedtls",
         "exports" : [
+            "include",
+            "include/mbedtls",
+            "library"
+        ],
+        "imports" : [
+            "wifi-core-freertos-lwip-mbedtls",
+            "mtb-dsl-pse8xxgp",
+            "core-lib",
+            "cmsis",
+            "mtb-srf",
+            "mtb-ipc",
+            "cy-mbedtls-acceleration",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ]
+    },
+    {
+        "name" : "connectivity-utilities",
+        "exports" : [
+            "include",
+            ".",
+            "network",
+            "cy_log"
+        ],
+        "imports" : [
+            "core-lib",
+            "abstraction-rtos",
+            "core-lib",
+            "cmsis",
+            "freertos",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "async-transfer",
+            "wifi-host-driver",
+            "lwip",
+            "lwip-freertos-integration",
+            "lwip-network-interface-integration",
+            "wifi-core-freertos-lwip-mbedtls",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",            
+            "***PROJECT***"            
+        ]
+    },
+    {
+        "name" : "cy-mbedtls-acceleration",
+        "exports" : [
+            ".",
+            "include",
+            "mbedtls_PSA/mbedtls_psa_MXCrypto",
+            "mbedtls_MXCRYPTO"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "ifx-mbedtls",
+            "wifi-core-freertos-lwip-mbedtls",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ]
+    },
+    {
+        "name" : "lwip",
+        "exports" : [
+            "src/include",
+            "src/include/netif"
+        ],
+        "excludes" : [
+            "doc",
+            "src/apps/http/makefsdata",
+                "src/apps/http/fsdata.c",
+                "test"
+            ],
+        "imports" : [
+            "lwip-freertos-integration",
+            "wifi-core-freertos-lwip-mbedtls",
+            "wifi-host-driver",
+            "mtb-dsl-pse8xxgp",
+            "core-lib",
+            "cmsis",
+            "mtb-srf",
+            "mtb-ipc",
+            "ifx-mbedtls",
+            "cy-mbedtls-acceleration",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ]
+    },
+    {
+        "name" : "wifi-core-freertos-lwip-mbedtls",
+        "exports" : [
+            ".",
+            "include",
+            "configs"
+        ],
+        "imports" : [
+        ]
+    },
+    {
+        "name" : "wifi-host-driver",
+        "exports" : [
+            "WHD/COMPONENT_WIFI6/inc",
+            "WHD/COMPONENT_WIFI6/src/include"
+        ],
+        "internal" : [
+            "External/rtos",
+            "WHD/COMPONENT_WIFI6/resources/firmware",
+            "WHD/COMPONENT_WIFI6/resources/resource_imp",
+            "WHD/COMPONENT_WIFI6/resources",
+            "WHD/COMPONENT_WIFI6/src",
+            "."
+        ],
+        "imports" : [
+            "mtb-dsl-pse8xxgp",
+            "core-lib",
+            "abstraction-rtos",
+            "freertos",
+            "cmsis",
+            "mtb-ipc",
+            "mtb-srf",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ]
+    },
+    {
+        "name" : "whd-bsp-integration",
+        "exports" : [
+            "."
+        ],
+        "imports" : [
+            "wifi-host-driver",
+            "wifi-core-freertos-lwip-mbedtls",
+            "core-lib",
+            "mtb-dsl-pse8xxgp",
+            "cmsis",
+            "mtb-srf",
+            "mtb-ipc",
+            "async-transfer",
+            "freertos",
+            "lwip",
+            "lwip-freertos-integration",
+            "abstraction-rtos",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ]
+    },
+    {
+        "name" : "lwip-freertos-integration",
+        "exports" : [
+            "."
+        ],
+        "imports" : [
+            "lwip",
+            "wifi-core-freertos-lwip-mbedtls",
+            "wifi-host-driver",
+            "mtb-dsl-pse8xxgp",
+            "core-lib",
+            "cmsis",
+            "mtb-srf",
+            "mtb-ipc",
+            "ifx-mbedtls",
+            "cy-mbedtls-acceleration",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ]
+    },
+    {
+        "name" : "lwip-network-interface-integration",
+        "exports" : [
+            "include",
+            "source"
+        ],
+        "imports" : [
+            "lwip",
+            "lwip-freertos-integration",
+            "connectivity-utilities",
+            "whd-bsp-integration",
+            "wifi-core-freertos-lwip-mbedtls",
+            "wifi-host-driver",
+            "mtb-dsl-pse8xxgp",
+            "core-lib",
+            "cmsis",
+            "mtb-srf",
+            "mtb-ipc",
+            "ifx-mbedtls",
+            "cy-mbedtls-acceleration",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ]
+    },
+    {
+        "name" : "secure-sockets",
+        "exports" : [
+            "include"
+        ],
+        "internal" : [
+            "source/COMPONENT_MBEDTLS/include",
+            "source"
+        ],
+        "imports" : [
+            "connectivity-utilities",
+            "lwip",
+            "lwip-freertos-integration",
+            "lwip-network-interface-integration",
+            "wifi-core-freertos-lwip-mbedtls",
+            "wifi-host-driver",
+            "whd-bsp-integration",
+            "ifx-mbedtls",
+            "cy-mbedtls-acceleration",
+            "abstraction-rtos",
+            "freertos",
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "mtb-ipc",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ]
+    },
+    {
+        "name" : "wifi-connection-manager",
+        "exports" : [
+            "include",
+            "."
+        ],
+        "internal" : [
+            "source/COMPONENT_55500"
+        ],
+        "imports" : [
+            "core-lib",
+            "abstraction-rtos",
+            "cmsis",
+            "freertos",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "mtb-ipc",
+            "async-transfer",
+            "wifi-host-driver",
+            "lwip",
+            "lwip-freertos-integration",
+            "lwip-network-interface-integration",
+            "wifi-core-freertos-lwip-mbedtls",
+            "connectivity-utilities",
+            "whd-bsp-integration",
+            "ifx-mbedtls",
+            "cy-mbedtls-acceleration",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "wpa3-external-supplicant",
+        "exports" : [
+            "include"
+        ],
+        "internal" : [
             "include"
         ],
         "imports" : [
+            "core-lib",
+            "abstraction-rtos",
+            "cmsis",
+            "freertos",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "mtb-ipc",
+            "async-transfer",
+            "wifi-host-driver",
+            "wifi-connection-manager",
+            "connectivity-utilities",
+            "wifi-core-freertos-lwip-mbedtls",
+            "ifx-mbedtls",
+            "cy-mbedtls-acceleration",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
         ]
     }
 ]

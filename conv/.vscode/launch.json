@@ -11,10 +11,10 @@
             "sourceMaps": true,
             "console": "integratedTerminal",
             "args": [
+                "--cmake-only",
                 "--target", "gcc",
-                "--source", "${workspaceFolder}/../projects/ble/PSOC_Edge_Bluetooth_A2DP_Sink",
-                "--dest", "${workspaceFolder}/../projects/ble/PSOC_Edge_Bluetooth_A2DP_Sink5",
-                "--force"
+                "--source", "${workspaceFolder}/../projects/wifiscan",
+                "--dest", "${workspaceFolder}/../projects/wifiscan5",
             ]
         }
     ]

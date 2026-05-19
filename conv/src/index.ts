@@ -13,6 +13,7 @@ function printUsage(): void {
     console.log("  --sign-combine <path>  Path to EPT sign-combine JSON config");
     console.log("  --set <key> <value>    Override a sign-combine symbol value (repeatable)");
     console.log("  --target <list>        Comma-separated toolchain targets to process (iar,gcc,llvm,arm; default: all)");
+    console.log("  --cmake-only           Regenerate cmake files only; skip all file copies (dest must already exist, cannot use with --force)");
 }
 
 function main(): void {
@@ -23,6 +24,7 @@ function main(): void {
     let dest: string | undefined;
     let logfile: string | undefined;
     let force = false;
+    let cmakeOnly = false;
     let bsp: string | undefined;
     let signCombine: string | undefined;
     const setOverrides = new Map<string, string>();
@@ -59,6 +61,8 @@ function main(): void {
             logfile = args[i];
         } else if (arg === "--force") {
             force = true;
+        } else if (arg === "--cmake-only") {
+            cmakeOnly = true;
         } else if (arg === "--bsp") {
             i++;
             if (i >= args.length) {
@@ -130,8 +134,15 @@ function main(): void {
         process.exit(1);
     }
 
+    if (cmakeOnly && force) {
+        console.error("Error: --cmake-only and --force cannot be used together");
+        printUsage();
+        process.exit(1);
+    }
+
     const converter = new MTB5Converter(source, dest, logfile);
     converter.forceDeleteDest = force;
+    converter.cmakeOnly = cmakeOnly;
     converter.bspName = bsp;
     converter.signCombinePath = signCombine;
     converter.setOverrides = setOverrides;

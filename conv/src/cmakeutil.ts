@@ -16,9 +16,10 @@ export interface ComponentImport {
 export interface DependsEntry {
     name: string ;
     exports: string[] ;
-    imports: (string | ComponentImport)[] ;
+    imports?: (string | ComponentImport)[] ;
     includes?: string[] ;
     internal?: string[] ;
+    excludes?: string[] ;
 }
 
 export interface CompileEntry {
@@ -309,6 +310,30 @@ function readDefinesFromFile(filePath: string) : string[] {
         }
     }
     return defines ;
+}
+
+//
+// Resolve relative file-path values embedded in compiler defines to absolute
+// paths.  Defines like FW_IMAGE_NAME="../../mtb_shared/..." are recorded by
+// the MTB build system relative to the build directory in which codegen ran.
+// When we regenerate CMakeLists.txt for a different build layout those
+// relative paths become incorrect.  This function detects any define whose
+// value is a double-quoted string beginning with "../" and resolves the path
+// relative to the directory containing the .defines file, producing an
+// absolute (forward-slash) path that is valid regardless of where cmake is
+// later invoked.
+//
+export function fixDefineFilePaths(defines: string[], baseDir: string) : string[] {
+    return defines.map(def => {
+        // Match NAME="../../some/path" — a quoted double-quote value that is a relative path.
+        const m = /^([^=]+=)"(\.\.\/[^"]+)"$/.exec(def) ;
+        if (!m) return def ;
+        const prefix  = m[1] ;   // e.g. "FW_IMAGE_NAME="
+        const relPath = m[2] ;   // e.g. "../../mtb_shared/wifi-host-driver/..."
+        const absPath = path.resolve(baseDir, relPath) ;
+        // Use forward slashes so the string is valid on all platforms and inside cmake strings.
+        return `${prefix}"${absPath.replace(/\\/g, '/')}"` ;
+    }) ;
 }
 
 //
@@ -789,7 +814,7 @@ export function resolveIncludeDirs(
         }
     }
 
-    for (const imp of entry.imports) {
+    for (const imp of (entry.imports ?? [])) {
         if (typeof imp === 'object') {
             // Conditional import: resolve the named dependency's exports
             // and wrap them with the component condition.
@@ -1533,7 +1558,7 @@ function sortAssetsByDependency(
             continue ;
         }
         const neighbors = adjList.get(asset.name)! ;
-        for (const imp of entry.imports) {
+        for (const imp of (entry.imports ?? [])) {
             if (typeof imp === 'object') {
                 // ComponentImport: only materialise this edge when the component is active.
                 if (activeComponentSet.has(imp.component) && assetNameSet.has(imp.name)) {
