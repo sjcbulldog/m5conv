@@ -2,7 +2,25 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "CMakeToIARProject",
+      "name": "CMakeToIAR",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${workspaceFolder}/src/index.ts",
+      "args" : [
+        "--force", 
+        "--target", "iar",
+        "../projects/graphics5", 
+        "../projects/cmakebuild", 
+        "../projects/iar/graphics"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "CMakeToEclipse",
       "type": "node",
       "request": "launch",
       "runtimeExecutable": "node",
@@ -11,13 +29,13 @@
       "args" : [
         "--force", 
         "--target", "eclipse",
-        "../projects/graphics5", 
+        "../projects/mtb5/graphics5", 
         "../projects/cmakebuild", 
-        "../projects/eclipseproj"
+        "../projects/eclipse/graphics"
       ],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
-    }
+    }    
   ]
 }

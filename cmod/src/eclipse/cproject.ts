@@ -20,12 +20,24 @@ export interface EclipseCprojectInput {
   projectName: string;
   /** ARM CPU identifier as it appears after `-mcpu=`, e.g. `"cortex-m33"`. */
   mcpu: string;
+  /** Whether to enable TrustZone (-mcmse). */
+  mcmse: boolean;
   /** Absolute include paths collected from all compile groups. */
   includes: string[];
   /** Preprocessor defines collected from all compile groups, e.g. `"FOO=1"` or `"BAR"`. */
   defines: string[];
   /** Linker script paths as they appear in the link command (-T ...). */
   linkerScripts: string[];
+  /** Library search paths for the linker (-L ...), without the -L prefix. */
+  libraryPaths: string[];
+  /** Library names for -l flags, without the -l prefix. */
+  libs: string[];
+  /** Additional object files to link (e.g. NSC veneer .o files). */
+  otherObjs: string[];
+  /** Miscellaneous linker flags not covered by other specific options. */
+  linkerOtherFlags: string;
+  /** Whether to link with newlib-nano (--specs=nano.specs). */
+  useNano: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,7 +115,7 @@ function toolChainOptions(ind: string, inp: EclipseCprojectInput): string {
   const mcpuVal = `option.arm.target.mcpu.${inp.mcpu}`;
   return [
     optBool(ind, 'option.addtools.createflash', 'Create flash image', true, false),
-    optBool(ind, 'option.addtools.createlisting', 'Create extended listing', true, false),
+    optBool(ind, 'option.addtools.createlisting', 'Create extended listing', false, false),
     optBool(ind, 'option.addtools.printsize', 'Print size', true, false),
     optEnum(ind, 'option.optimization.level', 'Optimization Level',
       'option.optimization.level.debug', true),
@@ -114,6 +126,7 @@ function toolChainOptions(ind: string, inp: EclipseCprojectInput): string {
     optEnum(ind, 'option.debugging.level', 'Debug level',
       'option.debugging.level.max', true),
     optEnum(ind, 'option.arm.target.family', 'Arm family (-mcpu)', mcpuVal, false),
+    optBool(ind, 'option.arm.target.mcmse', 'TrustZone (-mcmse)', inp.mcmse, true),
     optEnum(ind, 'option.arm.target.fpu.abi', 'Float ABI',
       'option.arm.target.fpu.abi.soft', true),
     optBool(ind, 'option.warnings.allwarn', 'Enable all common warnings (-Wall)', true, true),
@@ -140,7 +153,7 @@ function assemblerTool(ind: string, toolId: string, inp: EclipseCprojectInput): 
   const optInd = ind + '\t';
   const inclOpt = optList(
     optInd, 'option.assembler.include.paths', 'Include paths (-I)', 'includePath',
-    inp.includes.map((p) => `"${p.replace(/\\/g, '/')}"`),
+    inp.includes.map((p) => p.replace(/\\/g, '/')),
   );
   const defOpt = optList(
     optInd, 'option.assembler.defs', 'Defined symbols (-D)', 'definedSymbols',
@@ -162,7 +175,7 @@ function cCompilerTool(ind: string, toolId: string, inp: EclipseCprojectInput): 
   const optInd = ind + '\t';
   const inclOpt = optList(
     optInd, 'option.c.compiler.include.paths', 'Include paths (-I)', 'includePath',
-    inp.includes.map((p) => `"${p.replace(/\\/g, '/')}"`),
+    inp.includes.map((p) => p.replace(/\\/g, '/')),
   );
   const defOpt = optList(
     optInd, 'option.c.compiler.defs', 'Defined symbols (-D)', 'definedSymbols',
@@ -184,7 +197,7 @@ function cppCompilerTool(ind: string, toolId: string, inp: EclipseCprojectInput)
   const optInd = ind + '\t';
   const inclOpt = optList(
     optInd, 'option.cpp.compiler.include.paths', 'Include paths (-I)', 'includePath',
-    inp.includes.map((p) => `"${p.replace(/\\/g, '/')}"`),
+    inp.includes.map((p) => p.replace(/\\/g, '/')),
   );
   const defOpt = optList(
     optInd, 'option.cpp.compiler.defs', 'Defined symbols (-D)', 'definedSymbols',
@@ -215,10 +228,28 @@ function cLinkerTool(ind: string, toolId: string, inp: EclipseCprojectInput): st
   const optInd = ind + '\t';
   const gcSect = optBool(optInd, 'option.c.linker.gcsections',
     'Remove unused sections (-Xlinker --gc-sections)', true);
+  const nanoOpt = inp.useNano
+    ? optBool(optInd, 'option.c.linker.usenewlibnano', 'Use newlib-nano (--specs=nano.specs)', true)
+    : '';
   const scriptOpt = optList(
     optInd, 'option.c.linker.scriptfile', 'Script files (-T)', 'stringList',
     inp.linkerScripts, false,
   );
+  const pathsOpt = optList(
+    optInd, 'option.c.linker.paths', 'Library search path (-L)', 'libPaths',
+    inp.libraryPaths.map((p) => p.replace(/\\/g, '/')), false,
+  );
+  const libsOpt = optList(
+    optInd, 'option.c.linker.libs', 'Libraries (-l)', 'libs',
+    inp.libs, false,
+  );
+  const otherObjsOpt = optList(
+    optInd, 'option.c.linker.otherobjs', 'Other objects', 'stringList',
+    inp.otherObjs, false,
+  );
+  const otherFlagsOpt = inp.linkerOtherFlags
+    ? optStr(optInd, 'option.c.linker.other', 'Other linker flags', inp.linkerOtherFlags)
+    : '';
   const inputType = [
     `${optInd}<inputType id="${X}.tool.c.linker.input.${rid()}" superClass="${X}.tool.c.linker.input">`,
     `${optInd}\t<additionalInput kind="additionalinputdependency" paths="$(USER_OBJS)"/>`,
@@ -228,7 +259,12 @@ function cLinkerTool(ind: string, toolId: string, inp: EclipseCprojectInput): st
   return [
     `${ind}<tool id="${toolId}" name="GNU ARM Cross C Linker" superClass="${X}.tool.c.linker">`,
     gcSect,
+    nanoOpt,
     scriptOpt,
+    pathsOpt,
+    libsOpt,
+    otherObjsOpt,
+    otherFlagsOpt,
     inputType,
     `${ind}</tool>`,
   ]
@@ -240,10 +276,28 @@ function cppLinkerTool(ind: string, toolId: string, inp: EclipseCprojectInput): 
   const optInd = ind + '\t';
   const gcSect = optBool(optInd, 'option.cpp.linker.gcsections',
     'Remove unused sections (-Xlinker --gc-sections)', true, false);
+  const nanoOpt = inp.useNano
+    ? optBool(optInd, 'option.cpp.linker.usenewlibnano', 'Use newlib-nano (--specs=nano.specs)', true)
+    : '';
   const scriptOpt = optList(
     optInd, 'option.cpp.linker.scriptfile', 'Script files (-T)', 'stringList',
     inp.linkerScripts, false,
   );
+  const pathsOpt = optList(
+    optInd, 'option.cpp.linker.paths', 'Library search path (-L)', 'libPaths',
+    inp.libraryPaths.map((p) => p.replace(/\\/g, '/')), false,
+  );
+  const libsOpt = optList(
+    optInd, 'option.cpp.linker.libs', 'Libraries (-l)', 'libs',
+    inp.libs, false,
+  );
+  const otherObjsOpt = optList(
+    optInd, 'option.cpp.linker.otherobjs', 'Other objects', 'stringList',
+    inp.otherObjs, false,
+  );
+  const otherFlagsOpt = inp.linkerOtherFlags
+    ? optStr(optInd, 'option.cpp.linker.other', 'Other linker flags', inp.linkerOtherFlags)
+    : '';
   const inputType = [
     `${optInd}<inputType id="${X}.tool.cpp.linker.input.${rid()}" superClass="${X}.tool.cpp.linker.input">`,
     `${optInd}\t<additionalInput kind="additionalinputdependency" paths="$(USER_OBJS)"/>`,
@@ -253,7 +307,12 @@ function cppLinkerTool(ind: string, toolId: string, inp: EclipseCprojectInput): 
   return [
     `${ind}<tool id="${toolId}" name="GNU ARM Cross C++ Linker" superClass="${X}.tool.cpp.linker">`,
     gcSect,
+    nanoOpt,
     scriptOpt,
+    pathsOpt,
+    libsOpt,
+    otherObjsOpt,
+    otherFlagsOpt,
     inputType,
     `${ind}</tool>`,
   ]
@@ -299,8 +358,8 @@ export function renderCproject(inp: EclipseCprojectInput): string {
   const tcOpts = toolChainOptions(i7, inp);
 
   return [
-    `<?xml version="1.0" encoding="UTF-8" standalone="no"?><?fileVersion 4.0.0?><cproject`,
-    `storage_type_id="org.eclipse.cdt.core.XmlProjectDescriptionStorage">`,
+    `<?xml version="1.0" encoding="UTF-8" standalone="no"?>`,
+    `<?fileVersion 4.0.0?><cproject storage_type_id="org.eclipse.cdt.core.XmlProjectDescriptionStorage">`,
     `${i1}<storageModule moduleId="org.eclipse.cdt.core.settings">`,
     `${i2}<cconfiguration id="${cfgId}">`,
     // --- inner settings storageModule ---
@@ -327,15 +386,17 @@ export function renderCproject(inp: EclipseCprojectInput): string {
     `${i4}    parent="${X}.config.elf.debug">`,
     `${i5}<folderInfo id="${cfgId}." name="/" resourcePath="">`,
     `${i6}<toolChain id="${tcId}" name="ARM Cross GCC"`,
+    `${i6}    nonInternalBuilderId="${X}.builder"`,
     `${i6}    superClass="${X}.toolchain.elf.debug">`,
     tcOpts,
     `${i7}<targetPlatform archList="all" binaryParser="org.eclipse.cdt.core.ELF"`,
     `${i7}    id="${tpId}" isAbstract="false" osList="all"`,
     `${i7}    superClass="${X}.targetPlatform"/>`,
-    `${i7}<builder buildPath="\${workspace_loc:/${xmlEscape(inp.projectName)}}/Debug"`,
-    `${i7}    id="${bldrId}" keepEnvironmentInBuildfile="false"`,
-    `${i7}    managedBuildOn="true" name="Gnu Make Builder"`,
-    `${i7}    superClass="${X}.builder"/>`,
+    `${i7}<builder autoBuildTarget="all" buildPath="\${workspace_loc:/${xmlEscape(inp.projectName)}}/Debug"`,
+    `${i7}    cleanBuildTarget="clean" command="\${cross_make}" id="${bldrId}"`,
+    `${i7}    incrementalBuildTarget="all" keepEnvironmentInBuildfile="false"`,
+    `${i7}    managedBuildOn="true" name="CDT Internal Builder"`,
+    `${i7}    superClass="org.eclipse.cdt.build.core.internal.builder"/>`,
     assemblerTool(i7, asmToolId, inp),
     cCompilerTool(i7, ccToolId, inp),
     cppCompilerTool(i7, cppToolId, inp),

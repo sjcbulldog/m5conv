@@ -130,7 +130,7 @@
             "Source/portable/COMPONENT_CM7",
             "Source/portable/COMPONENT_CM0/TOOLCHAIN_GCC_ARM",
             "Source/portable/COMPONENT_CM4/TOOLCHAIN_GCC_ARM",
-            "Source/portable/COMPONENT_CM7/TOOLCHAIN_GCC_ARM",
+            "Source/portable/COMPONENT_CM7/TOOLCHAIN_GCC_ARM",           
             "Source/portable/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/COMPONENT_FREERTOS_NTZ",
             "Source/portable/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/COMPONENT_FREERTOS_TZ",
             "Source/portable/COMPONENT_CM55/TOOLCHAIN_GCC_ARM",
@@ -150,6 +150,25 @@
             "***PROJECT***",
             "***BSP***",
             "***BSP***/config/GeneratedSource"
+        ],
+        "internal" : [
+            "Source/include",
+            "Source/portable/COMPONENT_CM0",
+            "Source/portable/COMPONENT_CM33",
+            "Source/portable/COMPONENT_CM4",
+            "Source/portable/COMPONENT_CM7",
+            "Source/portable/COMPONENT_CM0/TOOLCHAIN_GCC_ARM",
+            "Source/portable/COMPONENT_CM4/TOOLCHAIN_GCC_ARM",
+            "Source/portable/COMPONENT_CM7/TOOLCHAIN_GCC_ARM",           
+            "Source/portable/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/COMPONENT_FREERTOS_NTZ",
+            "Source/portable/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/COMPONENT_FREERTOS_TZ",
+            "Source/portable/COMPONENT_CM55/TOOLCHAIN_GCC_ARM",
+            "Source/portable/COMPONENT_CM0/TOOLCHAIN_IAR",
+            "Source/portable/COMPONENT_CM4/TOOLCHAIN_IAR",
+            "Source/portable/COMPONENT_CM7/TOOLCHAIN_IAR",
+            "Source/portable/COMPONENT_CM33/TOOLCHAIN_IAR/COMPONENT_FREERTOS_NTZ",
+            "Source/portable/COMPONENT_CM33/TOOLCHAIN_IAR/COMPONENT_FREERTOS_TZ",
+            "Source/portable/COMPONENT_CM55/TOOLCHAIN_IAR"
         ]
     },
     {

@@ -2,7 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug mtb5conv",
+            "name": "MTB->MTB5",
             "type": "node",
             "request": "launch",
             "program": "${workspaceFolder}/src/index.ts",
@@ -11,11 +11,19 @@
             "sourceMaps": true,
             "console": "integratedTerminal",
             "args": [
-                "--cmake-only",
+                "--force",
                 "--target", "gcc",
-                "--source", "${workspaceFolder}/../projects/wifiscan",
-                "--dest", "${workspaceFolder}/../projects/wifiscan5",
+                "--source", "${workspaceFolder}/../projects/mtb/${input:mtbProjectName}",
+                "--dest", "${workspaceFolder}/../projects/mtb5/${input:mtbProjectName}",
             ]
+        }
+    ],
+    "inputs": [
+        {
+            "id" : "mtbProjectName",
+            "type" : "promptString",
+            "description" : "Name of the project to convert",
+            "default" : "graphics"
         }
     ]
 }

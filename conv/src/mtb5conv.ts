@@ -1,5 +1,5 @@
 import { ModusToolboxEnvironment, MTBLoadFlags } from "./mtbenv";
-import { collectSources, collectHeaders, generateObjectLibraryCMakeLists, generateHeaderOnlyCMakeLists, generateProjectCMakeLists, generateTopLevelCMakeLists, generateGccToolchainCMake, generateIarToolchainCMake, generateLlvmToolchainCMake, generateArmToolchainCMake, generateBspCMakeInclude, AssetSubdirectory, loadDependsDB, resolveIncludeDirs, resolveAssetExports, resolveAssetInternals, hasActiveSources, readProjectDefinesByConfig, readProjectDefinesForConfig, fixDefineFilePaths, readProjectFlagsByConfig, readProjectFlagsForConfig, mergeProjectFlagsByConfig, ProjectFlagsByConfig, ProjectFlagsByToolchain, DependsEntry, ConditionalIncludeDir, processSignCombineJson, SignCombineInfo } from './cmakeutil';
+import { collectSources, collectHeaders, generateObjectLibraryCMakeLists, generateHeaderOnlyCMakeLists, generateProjectCMakeLists, generateTopLevelCMakeLists, generateAppInfoCMake, generateProjInfoCMake, generateGccToolchainCMake, generateIarToolchainCMake, generateLlvmToolchainCMake, generateArmToolchainCMake, generateBspCMakeInclude, AssetSubdirectory, loadDependsDB, resolveIncludeDirs, resolveAssetExports, resolveAssetInternals, hasActiveSources, readProjectDefinesByConfig, readProjectDefinesForConfig, fixDefineFilePaths, readProjectFlagsByConfig, readProjectFlagsForConfig, mergeProjectFlagsByConfig, ProjectFlagsByConfig, ProjectFlagsByToolchain, DependsEntry, ConditionalIncludeDir, processSignCombineJson, SignCombineInfo } from './cmakeutil';
 import { MTBUtils } from './mtbenv/misc/mtbutils';
 import * as winston from 'winston';
 import * as fs from 'fs';
@@ -413,6 +413,8 @@ export class MTB5Converter {
 
             generateProjectCMakeLists(destProjDir, projName, sources, assetSubs, projectIncludeDirs, bspName, components, flagsByToolchain, debugDefines, releaseDefines, dependsDB) ;
             this.logger_.info(`Generated CMakeLists.txt for project '${projName}'`) ;
+            generateProjInfoCMake(destProjDir, components) ;
+            this.logger_.info(`Generated projinfo.cmake for project '${projName}'`) ;
         }
     }
 
@@ -636,6 +638,17 @@ export class MTB5Converter {
 
         generateTopLevelCMakeLists(this.dest_, projectNames, bspNameResolved, signCombineInfo, this.setOverrides) ;
         this.logger_.info('Generated top-level CMakeLists.txt') ;
+
+        // Generate appinfo.cmake using device and component info from the first project.
+        if (appInfo.projects.length > 0) {
+            const firstProject = appInfo.projects[0] ;
+            const device = firstProject.device ?? '' ;
+            const additionalDevicesRaw = firstProject.getVar('MTB_ADDITIONAL_DEVICES') ?? '' ;
+            const deviceList = [device, ...additionalDevicesRaw.split(' ').filter(d => d.length > 0)] ;
+            const components = firstProject.components ;
+            generateAppInfoCMake(this.dest_, device, deviceList, bspNameResolved, signCombineInfo, this.setOverrides) ;
+            this.logger_.info('Generated appinfo.cmake') ;
+        }
 
         if (!this.targets || this.targets.has('gcc')) {
             generateGccToolchainCMake(this.dest_) ;

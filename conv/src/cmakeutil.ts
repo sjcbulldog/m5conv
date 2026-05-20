@@ -534,17 +534,15 @@ function parseFlags(content: string, isLink: boolean) : { flags: string[], hasCm
 }
 
 //
-// Rewrite a single .ldlibs path token.  Object files (.o / .obj) are build
-// artifacts that live in the CMake binary tree; everything else (prebuilt
-// archives) lives in the source tree.
+// Rewrite a single .ldlibs path token.  All relative paths (prefixed with
+// "../") are resolved against the CMake source tree.  This includes the NSC
+// veneer object file, which is written to the secure project's source
+// directory so its path stays stable across clean rebuilds.
 //
 function fixLdLibPath(token: string) : string {
     if (!/^\.\.\//.test(token)) return token ;
-    const binVar = '${CMAKE_CURRENT_BINARY_DIR}' ;
     const srcVar = '${CMAKE_CURRENT_SOURCE_DIR}' ;
-    return /\.o(?:bj)?$/.test(token)
-        ? `${binVar}/${token}`
-        : `${srcVar}/${token}` ;
+    return `${srcVar}/${token}` ;
 }
 
 //
@@ -1686,6 +1684,8 @@ export function generateProjectCMakeLists(
     lines.push('# avoid exceeding the Windows command-line length limit.') ;
     lines.push('set(CMAKE_NINJA_FORCE_RESPONSE_FILE ON CACHE BOOL "" FORCE)') ;
     lines.push('') ;
+    lines.push('include(${CMAKE_CURRENT_SOURCE_DIR}/projinfo.cmake)') ;
+    lines.push('') ;
 
     // Emit per-toolchain add_compile_options / add_link_options blocks derived
     // from running 'make codegen TOOLCHAIN=<t> CONFIG=<c>' for each combination.
@@ -1762,36 +1762,6 @@ export function generateProjectCMakeLists(
     lines.push('endif()') ;
     lines.push('') ;
 
-    // Toolchain names that appear in MTB_COMPONENTS and must be handled dynamically
-    // at CMake time (based on MTBTOOLCHAIN) rather than baked in statically.
-    const TOOLCHAIN_COMPONENTS = new Set(['GCC_ARM', 'IAR', 'LLVM_ARM', 'ARM']) ;
-
-    // Set component defines (normalise dashes to underscores for valid CMake identifiers;
-    // skip toolchain components which are handled separately below).
-    if (components.length > 0) {
-        const sorted = [...components]
-            .filter(c => !TOOLCHAIN_COMPONENTS.has(c))
-            .sort() ;
-        if (sorted.length > 0) {
-            for (const comp of sorted) {
-                lines.push(`set(COMPONENT_${comp.replace(/-/g, '_')} 1)`) ;
-            }
-            lines.push('') ;
-            lines.push('add_compile_definitions(') ;
-            for (const comp of sorted) {
-                lines.push(`    COMPONENT_${comp.replace(/-/g, '_')}`) ;
-            }
-            lines.push(')') ;
-            lines.push('') ;
-        }
-    }
-
-    // Toolchain component: set COMPONENT_<MTBTOOLCHAIN> at CMake configure time
-    // so the correct toolchain-specific source directories are selected.
-    lines.push('set(COMPONENT_${MTBTOOLCHAIN} 1)') ;
-    lines.push('add_compile_definitions(COMPONENT_${MTBTOOLCHAIN})') ;
-    lines.push('') ;
-
     // Add project-specific defines (from Debug/Release .defines files) using
     // add_compile_definitions so they propagate to child directories.
     // Generator expressions select the correct set for each build configuration.
@@ -1864,13 +1834,16 @@ export function generateProjectCMakeLists(
     }
 
     // CMSE TrustZone NSC veneer generation (secure project only).
-    // The link step writes a fresh veneer to a .tmp file; the custom command
-    // promotes it to the canonical path only when it has changed, avoiding
-    // spurious downstream rebuilds.
+    // The link step writes a fresh veneer to a .tmp file in the build tree;
+    // the custom command promotes it to nsc_veneer.o in the project source
+    // directory (CMAKE_CURRENT_SOURCE_DIR) only when it has changed.  Placing
+    // the canonical veneer in the source tree keeps its path stable across
+    // clean rebuilds, so the non-secure project can reference it with a fixed
+    // relative path via .ldlibs.
     if (gccFlags?.link.hasCmse) {
         lines.push('') ;
         lines.push('set(NSC_VENEER_TMP  ${CMAKE_CURRENT_BINARY_DIR}/nsc_veneer.o.tmp)') ;
-        lines.push('set(NSC_VENEER_PATH ${CMAKE_CURRENT_BINARY_DIR}/nsc_veneer.o)') ;
+        lines.push('set(NSC_VENEER_PATH ${CMAKE_CURRENT_SOURCE_DIR}/nsc_veneer.o)') ;
         lines.push('') ;
         // CMSE veneer link flags (-Wl,--cmse-implib / -Wl,--out-implib) use
         // GCC linker syntax; only emit them for the GCC toolchain.
@@ -2179,6 +2152,86 @@ export function processSignCombineJson(
 }
 
 //
+// Generate appinfo.cmake at the application root level.
+// This file contains MTBDEVICE and MTBDEVICELIST, defined once for the entire
+// application.  The top-level CMakeLists.txt includes this file.
+// Component set statements and their derived defines live in each project's
+// projinfo.cmake instead (see generateProjInfoCMake).
+//
+export function generateAppInfoCMake(
+    destDir: string,
+    device: string,
+    deviceList: string[],
+    bspName?: string,
+    signCombineInfo?: SignCombineInfo,
+    setOverrides: Map<string, string> = new Map()
+) : void {
+    const lines: string[] = [] ;
+
+    // General application-level information required by ModusToolbox tools.
+    lines.push(`set(MTBDEVICE ${device})`) ;
+    lines.push(`set(MTBDEVICELIST ${deviceList.join(' ')})`) ;
+
+    if (bspName && signCombineInfo) {
+        lines.push('') ;
+        // Variables used by the sign/combine step.
+        lines.push(`set(BSPPATH \${CMAKE_SOURCE_DIR}/bsps/${bspName})`) ;
+        for (const sym of signCombineInfo.symbols) {
+            const value = setOverrides.has(sym.symbolName)
+                ? setOverrides.get(sym.symbolName)!
+                : `\${CMAKE_BINARY_DIR}/${sym.basename}` ;
+            lines.push(`set(${sym.symbolName} ${value})`) ;
+        }
+    }
+
+    lines.push('') ;
+
+    const appinfoPath = path.join(destDir, 'appinfo.cmake') ;
+    fs.writeFileSync(appinfoPath, lines.join('\n')) ;
+}
+
+//
+// Generate projinfo.cmake inside a project directory.
+// This file contains the COMPONENT_* set statements for each component
+// active in the project, together with the corresponding
+// add_compile_definitions() call so preprocessor macros are also defined.
+// A project's CMakeLists.txt includes this file early so conditional source
+// and include-directory selection works correctly.
+//
+export function generateProjInfoCMake(
+    destProjDir: string,
+    components: string[]
+) : void {
+    const TOOLCHAIN_COMPONENTS = new Set(['GCC_ARM', 'IAR', 'LLVM_ARM', 'ARM']) ;
+    const lines: string[] = [] ;
+
+    const sorted = [...components]
+        .filter(c => !TOOLCHAIN_COMPONENTS.has(c))
+        .sort() ;
+    if (sorted.length > 0) {
+        for (const comp of sorted) {
+            lines.push(`set(COMPONENT_${comp.replace(/-/g, '_')} 1)`) ;
+        }
+        lines.push('') ;
+        lines.push('add_compile_definitions(') ;
+        for (const comp of sorted) {
+            lines.push(`    COMPONENT_${comp.replace(/-/g, '_')}`) ;
+        }
+        lines.push(')') ;
+        lines.push('') ;
+    }
+
+    // Toolchain component: set COMPONENT_<MTBTOOLCHAIN> at CMake configure time
+    // so the correct toolchain-specific source directories are selected.
+    lines.push('set(COMPONENT_${MTBTOOLCHAIN} 1)') ;
+    lines.push('add_compile_definitions(COMPONENT_${MTBTOOLCHAIN})') ;
+    lines.push('') ;
+
+    const projinfoPath = path.join(destProjDir, 'projinfo.cmake') ;
+    fs.writeFileSync(projinfoPath, lines.join('\n')) ;
+}
+
+//
 // Generate a top-level CMakeLists.txt that includes each project via
 // add_subdirectory().  When a paired secure/non-secure project set is
 // detected (names ending in _s / _ns), the _s project is ordered first
@@ -2199,6 +2252,8 @@ export function generateTopLevelCMakeLists(
     lines.push('if(NOT DEFINED MTBTOOLCHAIN)') ;
     lines.push('    set(MTBTOOLCHAIN "GCC_ARM")') ;
     lines.push('endif()') ;
+    lines.push('') ;
+    lines.push('include(appinfo.cmake)') ;
     lines.push('') ;
 
     // Sort so _s (secure) projects are added before their _ns counterparts
@@ -2250,15 +2305,6 @@ export function generateTopLevelCMakeLists(
         lines.push('    message(FATAL_ERROR "Could not find program edgeprotecttools")') ;
         lines.push('endif()') ;
         lines.push('message(STATUS "Found edgeprotecttools: ${EPT}")') ;
-        lines.push(`set(BSPPATH \${CMAKE_SOURCE_DIR}/bsps/${bspName})`) ;
-
-        for (const sym of signCombineInfo.symbols) {
-            const value = setOverrides.has(sym.symbolName)
-                ? setOverrides.get(sym.symbolName)!
-                : `\${CMAKE_BINARY_DIR}/${sym.basename}` ;
-            lines.push(`set(${sym.symbolName} ${value})`) ;
-        }
-
         lines.push('') ;
         const outputVar = `\${${signCombineInfo.outputSymbolName}}` ;
         const setArgs = signCombineInfo.symbols
