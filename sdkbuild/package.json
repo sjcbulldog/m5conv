@@ -1,0 +1,22 @@
+{
+  "name": "sdk-builder",
+  "version": "1.0.0",
+  "description": "Assembles an SDK from a set of cmake-based MTB5 applications",
+  "main": "dist/index.js",
+  "bin": {
+    "sdk-builder": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "ts-node src/index.ts",
+    "dev": "ts-node src/index.ts"
+  },
+  "dependencies": {
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  }
+}
