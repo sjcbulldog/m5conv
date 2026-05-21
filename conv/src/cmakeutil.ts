@@ -2168,19 +2168,39 @@ export function generateAppInfoCMake(
 ) : void {
     const lines: string[] = [] ;
 
-    // General application-level information required by ModusToolbox tools.
+    // Primary target device: MCU part number used by ModusToolbox BSP-generated code
+    // and tools to select device-specific configuration (clocks, memory maps, etc.).
     lines.push(`set(MTBDEVICE ${device})`) ;
+
+    // Full device list: includes the primary device plus any additional MCUs declared
+    // via MTB_ADDITIONAL_DEVICES.  Tools that need to know every core in a multi-core
+    // design (e.g. multi-image programming scripts) consume this list.
     lines.push(`set(MTBDEVICELIST ${deviceList.join(' ')})`) ;
 
     if (bspName && signCombineInfo) {
         lines.push('') ;
-        // Variables used by the sign/combine step.
+
+        // Path to the selected Board Support Package directory.  edgeprotecttools (EPT)
+        // uses this as its symbol-search root when resolving relative file references
+        // inside the sign-combine JSON configuration.
         lines.push(`set(BSPPATH \${CMAKE_SOURCE_DIR}/bsps/${bspName})`) ;
+
         for (const sym of signCombineInfo.symbols) {
             const value = setOverrides.has(sym.symbolName)
                 ? setOverrides.get(sym.symbolName)!
                 : `\${CMAKE_BINARY_DIR}/${sym.basename}` ;
-            lines.push(`set(${sym.symbolName} ${value})`) ;
+            if (sym.isTerminalOutput) {
+                // Terminal output artifact: the final combined/signed image produced by
+                // the EPT sign-combine step.  This path is used as the OUTPUT of the
+                // add_custom_command in CMakeLists.txt so CMake can track its freshness.
+                lines.push(`set(${sym.symbolName} ${value})`) ;
+            } else {
+                // Input artifact for the sign-combine step: a built image (ELF/HEX)
+                // emitted by one of the project targets and consumed by edgeprotecttools.
+                // Defaults to ${CMAKE_BINARY_DIR}/<basename>; override with --set if the
+                // file lands in a different location.
+                lines.push(`set(${sym.symbolName} ${value})`) ;
+            }
         }
     }
 
@@ -2243,7 +2263,8 @@ export function generateTopLevelCMakeLists(
     projectNames: string[],
     bspName?: string,
     signCombineInfo?: SignCombineInfo,
-    setOverrides: Map<string, string> = new Map()
+    setOverrides: Map<string, string> = new Map(),
+    cmseProjects: Set<string> = new Set()
 ) : void {
     const lines: string[] = [] ;
     lines.push('cmake_minimum_required(VERSION 3.16)') ;
@@ -2284,15 +2305,13 @@ export function generateTopLevelCMakeLists(
     if (secureNsPairs.length > 0) {
         lines.push('') ;
         for (const pair of secureNsPairs) {
-            // When the secure project generates an NSC veneer, depend on its
-            // _veneer custom target so the veneer file is ready before the
-            // non-secure project links.  Fall back to the ELF target itself
-            // for non-CMSE secure projects.
-            lines.push(`if(TARGET ${pair.s}.elf_veneer)`) ;
-            lines.push(`    add_dependencies(${pair.ns}.elf ${pair.s}.elf_veneer)`) ;
-            lines.push('else()') ;
-            lines.push(`    add_dependencies(${pair.ns}.elf ${pair.s}.elf)`) ;
-            lines.push('endif()') ;
+            // Emit an unconditional dependency based on whether the secure project
+            // was detected to generate a CMSE NSC veneer at conversion time.
+            if (cmseProjects.has(pair.s)) {
+                lines.push(`add_dependencies(${pair.ns}.elf ${pair.s}.elf_veneer)`) ;
+            } else {
+                lines.push(`add_dependencies(${pair.ns}.elf ${pair.s}.elf)`) ;
+            }
         }
     }
 

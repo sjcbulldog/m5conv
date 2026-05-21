@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "CMakeToIAR",
+      "name": "CMake->IAR",
       "type": "node",
       "request": "launch",
       "runtimeExecutable": "node",
@@ -10,17 +10,15 @@
       "program": "${workspaceFolder}/src/index.ts",
       "args" : [
         "--force", 
-        "--target", "iar",
-        "../projects/graphics5", 
-        "../projects/cmakebuild", 
-        "../projects/iar/graphics"
+        "--input", "../projects/mtb5/${input:mtbProjectName}", 
+        "--iar", "../projects/iar/${input:mtbProjectName}"
       ],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
     },
     {
-      "name": "CMakeToEclipse",
+      "name": "CMake->Eclipse",
       "type": "node",
       "request": "launch",
       "runtimeExecutable": "node",
@@ -28,14 +26,20 @@
       "program": "${workspaceFolder}/src/index.ts",
       "args" : [
         "--force", 
-        "--target", "eclipse",
-        "../projects/mtb5/graphics5", 
-        "../projects/cmakebuild", 
-        "../projects/eclipse/graphics"
+        "--input", "../projects/mtb5/${input:mtbProjectName}", 
+        "--eclipse", "../projects/eclipse/${input:mtbProjectName}"
       ],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
     }    
+  ],
+  "inputs": [
+    {
+        "id" : "mtbProjectName",
+        "type" : "promptString",
+        "description" : "Name of the project to convert",
+        "default" : "graphics"
+    }
   ]
 }

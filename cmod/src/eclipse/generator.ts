@@ -30,17 +30,39 @@ import { renderCproject, type EclipseCprojectInput } from './cproject.js';
 function detectMcpu(target: Target): string {
   for (const cg of target.compileGroups) {
     for (const f of cg.flags) {
-      const m = f.fragment.match(/-mcpu=([\w-]+)/);
+      const m = f.fragment.match(/-mcpu=([\w+.-]+)/);
       if (m) return m[1].toLowerCase();
     }
   }
   if (target.link) {
     for (const f of target.link.fragments) {
-      const m = f.fragment.match(/-mcpu=([\w-]+)/);
+      const m = f.fragment.match(/-mcpu=([\w+.-]+)/);
       if (m) return m[1].toLowerCase();
     }
   }
   return 'cortex-m33'; // safe default for this project family
+}
+
+/** Extract the -mfpu=<fpu> value from a target's compile flags. */
+function detectMfpu(target: Target): string | undefined {
+  for (const cg of target.compileGroups) {
+    for (const f of cg.flags) {
+      const m = f.fragment.match(/-mfpu=([\w-]+)/);
+      if (m) return m[1].toLowerCase();
+    }
+  }
+  return undefined;
+}
+
+/** Extract the -mfloat-abi=<abi> value from a target's compile flags. */
+function detectMfloatAbi(target: Target): string | undefined {
+  for (const cg of target.compileGroups) {
+    for (const f of cg.flags) {
+      const m = f.fragment.match(/-mfloat-abi=([\w-]+)/);
+      if (m) return m[1].toLowerCase();
+    }
+  }
+  return undefined;
 }
 
 /** Detect whether -mcmse (TrustZone Secure state) is present in compile flags. */
@@ -112,6 +134,8 @@ function collectDependentLibraries(target: Target): Target[] {
 /**
  * Flags already covered by Eclipse toolchain/compiler options — skip these
  * when building the linker "other flags" string to avoid duplication.
+ * Include paths (-I) and preprocessor defines (-D) are compile-time only
+ * and must never appear on the linker command line.
  */
 const SKIP_LINK_FLAG_PATTERNS: RegExp[] = [
   /^-mthumb$/i,
@@ -125,6 +149,8 @@ const SKIP_LINK_FLAG_PATTERNS: RegExp[] = [
   /^-Wall$/,
   /^-Wextra$/,
   /^-Wl,--gc-sections$/,
+  /^-I/,   // include paths — compile-time only
+  /^-D/,   // preprocessor defines — compile-time only
 ];
 
 interface LinkerData {
@@ -327,6 +353,8 @@ export class EclipseGenerator implements IBackend {
       const defines = collectDefines(allTargets);
       const mcpu = detectMcpu(target);
       const mcmse = detectMcmse(target);
+      const mfpu = detectMfpu(target);
+      const mfloatAbi = detectMfloatAbi(target);
       const linkerData = collectLinkerData(target);
 
       // --- Copy source files (preserving relative structure from sourceRoot) ---
@@ -420,6 +448,9 @@ export class EclipseGenerator implements IBackend {
         otherObjs: linkerData.otherObjs,
         linkerOtherFlags: linkerData.otherFlags,
         useNano: linkerData.useNano,
+        otherTargetFlags: mcpu.startsWith('cortex-m55') ? `-mcpu=${mcpu}` : undefined,
+        fpu: mfpu,
+        floatAbi: mfloatAbi,
       };
       const cprojectXml = renderCproject(cprojectInput);
       const cprojectFile = path.join(projectDir, '.cproject');

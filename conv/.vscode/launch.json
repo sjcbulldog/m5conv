@@ -11,7 +11,7 @@
             "sourceMaps": true,
             "console": "integratedTerminal",
             "args": [
-                "--force",
+                "--cmake-only",
                 "--target", "gcc",
                 "--source", "${workspaceFolder}/../projects/mtb/${input:mtbProjectName}",
                 "--dest", "${workspaceFolder}/../projects/mtb5/${input:mtbProjectName}",

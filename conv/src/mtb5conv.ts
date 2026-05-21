@@ -5,6 +5,45 @@ import * as winston from 'winston';
 import * as fs from 'fs';
 import * as path from 'path';
 
+// Recursively copy src to dest. Returns the list of paths that could not be
+// copied (e.g. Windows permission-denied), allowing the caller to emit a
+// consolidated warning rather than aborting the entire copy.
+async function copyDirTolerant(src: string, dest: string, skipped: string[] = []): Promise<string[]> {
+    await fs.promises.mkdir(dest, { recursive: true }) ;
+    let entries: fs.Dirent[] ;
+    try {
+        entries = await fs.promises.readdir(src, { withFileTypes: true }) ;
+    } catch (err) {
+        skipped.push(`${src} (cannot read directory: ${err})`) ;
+        return skipped ;
+    }
+    for (const entry of entries) {
+        const srcEntry = path.join(src, entry.name) ;
+        const destEntry = path.join(dest, entry.name) ;
+        try {
+            if (entry.isDirectory()) {
+                await copyDirTolerant(srcEntry, destEntry, skipped) ;
+            } else {
+                await fs.promises.copyFile(srcEntry, destEntry) ;
+            }
+        } catch (err) {
+            skipped.push(`${srcEntry} (${(err as NodeJS.ErrnoException).code ?? err})`) ;
+        }
+    }
+    return skipped ;
+}
+
+function warnSkippedFiles(logger: winston.Logger, label: string, skipped: string[]): void {
+    if (skipped.length === 0) return ;
+    const bar = '='.repeat(72) ;
+    logger.warn(bar) ;
+    logger.warn(`WARNING: ${skipped.length} file(s)/director(ies) could not be copied from ${label}`) ;
+    for (const s of skipped) {
+        logger.warn(`  SKIPPED: ${s}`) ;
+    }
+    logger.warn(bar) ;
+}
+
 export class MTB5Converter {
     private src_ : string ;
     private dest_ : string ;
@@ -16,6 +55,8 @@ export class MTB5Converter {
     public signCombinePath : string | undefined ;
     public setOverrides : Map<string, string> = new Map() ;
     public targets : Set<string> | undefined ;
+    // Projects detected to use CMSE TrustZone veneer generation (populated during copyProjects)
+    private cmseProjects_ : Set<string> = new Set() ;
 
     constructor(src : string, dest: string, logfile?: string) {
         this.src_ = src ;
@@ -67,13 +108,13 @@ export class MTB5Converter {
 
     private async convertAppInfo() : Promise<void> {
         this.logger_.info('Converting app info...') ;
-        this.copyBSPs() ;
-        this.copyAssets() ;
+        await this.copyBSPs() ;
+        await this.copyAssets() ;
         await this.copyProjects() ;
         this.generateTopLevel() ;
     }
 
-    private copyBSPs() : void {
+    private async copyBSPs() : Promise<void> {
         const srcBspsDir = path.join(this.src_, 'BSPs') ;
         if (!fs.existsSync(srcBspsDir)) {
             this.logger_.warn(`No BSPs directory found in source: ${srcBspsDir}`) ;
@@ -92,12 +133,8 @@ export class MTB5Converter {
                 const destTarget = path.join(destBspsDir, entry.name) ;
                 if (!this.cmakeOnly) {
                     this.logger_.info(`Copying BSP directory: ${entry.name}`) ;
-                    try {
-                        fs.cpSync(srcTarget, destTarget, { recursive: true }) ;
-                    } catch (err) {
-                        this.logger_.warn(`Failed to copy BSP directory '${entry.name}': ${err}`) ;
-                        continue ;
-                    }
+                    const bspSkipped = await copyDirTolerant(srcTarget, destTarget) ;
+                    warnSkippedFiles(this.logger_, `BSP '${entry.name}'`, bspSkipped) ;
                 } else if (!fs.existsSync(destTarget)) {
                     this.logger_.warn(`BSP directory '${entry.name}' not found in destination - skipping`) ;
                     continue ;
@@ -111,7 +148,7 @@ export class MTB5Converter {
         }
     }
 
-    private copyAssets() : void {
+    private async copyAssets() : Promise<void> {
         const appInfo = this.env_.appInfo ;
         if (!appInfo) {
             this.logger_.warn('No application info available - cannot copy assets') ;
@@ -160,19 +197,15 @@ export class MTB5Converter {
                     }
 
                     this.logger_.info(`Copying asset '${assetName}' from '${srcPath}'`) ;
-                    try {
-                        fs.cpSync(srcPath, destPath, { recursive: true }) ;
-                    } catch (err) {
-                        this.logger_.warn(`Failed to copy asset '${assetName}' from '${srcPath}': ${err}`) ;
-                        continue ;
-                    }
+                    const assetSkipped = await copyDirTolerant(srcPath, destPath) ;
+                    warnSkippedFiles(this.logger_, `asset '${assetName}'`, assetSkipped) ;
 
                     // Remove .git directory if present
                     const gitDir = path.join(destPath, '.git') ;
                     if (fs.existsSync(gitDir)) {
                         this.logger_.info(`Removing .git directory from asset '${assetName}'`) ;
                         try {
-                            fs.rmSync(gitDir, { recursive: true, force: true }) ;
+                            await fs.promises.rm(gitDir, { recursive: true, force: true }) ;
                         } catch (err) {
                             this.logger_.warn(`Failed to remove .git directory from asset '${assetName}': ${err}`) ;
                         }
@@ -265,7 +298,8 @@ export class MTB5Converter {
 
             if (!this.cmakeOnly) {
                 this.logger_.info(`Copying project '${projName}' from '${srcProjDir}'`) ;
-                fs.cpSync(srcProjDir, destProjDir, { recursive: true }) ;
+                const projSkipped = await copyDirTolerant(srcProjDir, destProjDir) ;
+                warnSkippedFiles(this.logger_, `project '${projName}'`, projSkipped) ;
 
                 // Remove makefiles
                 for (const mf of ['Makefile', 'makefile']) {
@@ -373,6 +407,7 @@ export class MTB5Converter {
                         this.logger_.info(`  [${tc}] flag files — ${fmt(fbc.c, 'cflags')} | ${fmt(fbc.asm, 'asflags')} | ${fmt(fbc.cxx, 'cxxflags')} | ${fmt(fbc.link, 'ldflags')} | ${fmt(fbc.libs, 'ldlibs')}`) ;
                         if (fbc.link.hasCmse) {
                             this.logger_.info(`  [${tc}] CMSE TrustZone veneer generation detected for '${projName}'`) ;
+                            this.cmseProjects_.add(projName) ;
                         }
                         const libCount = new Set([...fbc.libs.debug, ...fbc.libs.release]).size ;
                         if (libCount > 0) {
@@ -636,7 +671,7 @@ export class MTB5Converter {
             }
         }
 
-        generateTopLevelCMakeLists(this.dest_, projectNames, bspNameResolved, signCombineInfo, this.setOverrides) ;
+        generateTopLevelCMakeLists(this.dest_, projectNames, bspNameResolved, signCombineInfo, this.setOverrides, this.cmseProjects_) ;
         this.logger_.info('Generated top-level CMakeLists.txt') ;
 
         // Generate appinfo.cmake using device and component info from the first project.

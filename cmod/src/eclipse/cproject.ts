@@ -38,6 +38,15 @@ export interface EclipseCprojectInput {
   linkerOtherFlags: string;
   /** Whether to link with newlib-nano (--specs=nano.specs). */
   useNano: boolean;
+  /**
+   * When set, written as `option.arm.target.other` inside each compiler/assembler tool.
+   * Used for CPUs (e.g. cortex-m55) not present in the plugin's "Arm family" dropdown.
+   */
+  otherTargetFlags?: string;
+  /** FPU unit identifier as it appears after `-mfpu=`, e.g. `"fpv5-d16"`. Undefined = no FPU. */
+  fpu?: string;
+  /** Float ABI as it appears after `-mfloat-abi=`, e.g. `"hard"` or `"softfp"`. */
+  floatAbi?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -106,13 +115,50 @@ function optList(
   ].join('\n');
 }
 
+/**
+ * Map a `-mfpu=` value to the Eclipse Embedded CDT FPU unit enum suffix.
+ * Returns `undefined` if the FPU name is not recognised (falls back to default).
+ */
+function fpuUnitVal(mfpu: string): string | undefined {
+  const map: Record<string, string> = {
+    'fpv4-sp-d16': 'option.arm.target.fpu.unit.fpv4spd16',
+    'fpv5-d16':    'option.arm.target.fpu.unit.fpv5d16',
+    'fpv5-sp-d16': 'option.arm.target.fpu.unit.fpv5spd16',
+  };
+  return map[mfpu.toLowerCase()];
+}
+
+/** Map a `-mfloat-abi=` value to the Eclipse Embedded CDT float-ABI enum suffix. */
+function floatAbiVal(mfloatAbi: string): string {
+  const map: Record<string, string> = {
+    soft:   'option.arm.target.fpu.abi.soft',
+    softfp: 'option.arm.target.fpu.abi.softfp',
+    hard:   'option.arm.target.fpu.abi.hard',
+  };
+  return map[mfloatAbi.toLowerCase()] ?? 'option.arm.target.fpu.abi.soft';
+}
+
 // ---------------------------------------------------------------------------
 // Section builders
 // ---------------------------------------------------------------------------
 
 /** Options that live directly inside the <toolChain> element (7 tabs deep). */
 function toolChainOptions(ind: string, inp: EclipseCprojectInput): string {
-  const mcpuVal = `option.arm.target.mcpu.${inp.mcpu}`;
+  // cortex-m55 (and variants like cortex-m55+nodsp) is not present in the Eclipse
+  // Embedded CDT plugin's "Arm family" dropdown.  Fall back to "Toolchain default";
+  // the -mcpu= flag is injected into each compiler/assembler tool via otherTargetFlags.
+  const isCm55 = inp.mcpu.startsWith('cortex-m55');
+  const mcpuVal = isCm55
+    ? 'option.arm.target.mcpu.default'
+    : `option.arm.target.mcpu.${inp.mcpu}`;
+
+  const fpuUnitOpt = inp.fpu
+    ? (fpuUnitVal(inp.fpu) ?? 'option.arm.target.fpu.unit.default')
+    : 'option.arm.target.fpu.unit.default';
+  const fpuAbiOpt = inp.floatAbi
+    ? floatAbiVal(inp.floatAbi)
+    : 'option.arm.target.fpu.abi.soft';
+
   return [
     optBool(ind, 'option.addtools.createflash', 'Create flash image', true, false),
     optBool(ind, 'option.addtools.createlisting', 'Create extended listing', false, false),
@@ -127,10 +173,10 @@ function toolChainOptions(ind: string, inp: EclipseCprojectInput): string {
       'option.debugging.level.max', true),
     optEnum(ind, 'option.arm.target.family', 'Arm family (-mcpu)', mcpuVal, false),
     optBool(ind, 'option.arm.target.mcmse', 'TrustZone (-mcmse)', inp.mcmse, true),
-    optEnum(ind, 'option.arm.target.fpu.abi', 'Float ABI',
-      'option.arm.target.fpu.abi.soft', true),
+    optEnum(ind, 'option.arm.target.fpu.unit', 'FPU unit', fpuUnitOpt, true),
+    optEnum(ind, 'option.arm.target.fpu.abi', 'Float ABI', fpuAbiOpt, true),
     optBool(ind, 'option.warnings.allwarn', 'Enable all common warnings (-Wall)', true, true),
-    optBool(ind, 'option.warnings.extrawarn', 'Enable extra warnings (-Wextra)', true, true),
+    optBool(ind, 'option.warnings.extrawarn', 'Enable extra warnings (-Wextra)', false, true),
     optEnum(ind, 'option.architecture', 'Architecture',
       'option.architecture.arm', false),
     optEnum(ind, 'option.arm.target.instructionset', 'Instruction set',
@@ -159,11 +205,15 @@ function assemblerTool(ind: string, toolId: string, inp: EclipseCprojectInput): 
     optInd, 'option.assembler.defs', 'Defined symbols (-D)', 'definedSymbols',
     inp.defines,
   );
+  const otherTargetOpt = inp.otherTargetFlags
+    ? optStr(optInd, 'option.arm.target.other', 'Other target flags', inp.otherTargetFlags)
+    : '';
   const inputType = `${optInd}<inputType id="${X}.tool.assembler.input.${rid()}" superClass="${X}.tool.assembler.input"/>`;
   return [
     `${ind}<tool id="${toolId}" name="GNU ARM Cross Assembler" superClass="${X}.tool.assembler">`,
     inclOpt,
     defOpt,
+    otherTargetOpt,
     inputType,
     `${ind}</tool>`,
   ]
@@ -181,11 +231,15 @@ function cCompilerTool(ind: string, toolId: string, inp: EclipseCprojectInput): 
     optInd, 'option.c.compiler.defs', 'Defined symbols (-D)', 'definedSymbols',
     inp.defines,
   );
+  const otherTargetOpt = inp.otherTargetFlags
+    ? optStr(optInd, 'option.arm.target.other', 'Other target flags', inp.otherTargetFlags)
+    : '';
   const inputType = `${optInd}<inputType id="${X}.tool.c.compiler.input.${rid()}" superClass="${X}.tool.c.compiler.input"/>`;
   return [
     `${ind}<tool id="${toolId}" name="GNU ARM Cross C Compiler" superClass="${X}.tool.c.compiler">`,
     inclOpt,
     defOpt,
+    otherTargetOpt,
     inputType,
     `${ind}</tool>`,
   ]
@@ -211,12 +265,16 @@ function cppCompilerTool(ind: string, toolId: string, inp: EclipseCprojectInput)
     'Do not use _cxa_atexit() (-fno-use-cxa-atexit)', true, true);
   const noTss = optBool(optInd, 'option.cpp.compiler.nothreadsafestatics',
     'Do not use thread-safe statics (-fno-threadsafe-statics)', true, true);
+  const otherTargetOpt = inp.otherTargetFlags
+    ? optStr(optInd, 'option.arm.target.other', 'Other target flags', inp.otherTargetFlags)
+    : '';
   const inputType = `${optInd}<inputType id="${X}.tool.cpp.compiler.input.${rid()}" superClass="${X}.tool.cpp.compiler.input"/>`;
   return [
     `${ind}<tool id="${toolId}" name="GNU ARM Cross C++ Compiler" superClass="${X}.tool.cpp.compiler">`,
     inclOpt,
     defOpt,
     noExcept, noRtti, noUseAt, noTss,
+    otherTargetOpt,
     inputType,
     `${ind}</tool>`,
   ]

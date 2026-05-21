@@ -2,86 +2,87 @@
 import { promises as fs } from "node:fs";
 import { spawn } from "node:child_process";
 import path from "node:path";
+import os from "node:os";
 import { CMakeFileApiReader } from "./cmake/index.js";
 import { IarGenerator } from "./iar/index.js";
 import { EclipseGenerator } from "./eclipse/index.js";
 
-type Target = 'iar' | 'eclipse';
-
-const VALID_TARGETS: Target[] = ['iar', 'eclipse'];
-
 interface CliArgs {
-  sourceDir: string;
-  buildDir: string;
-  destDir: string;
+  inputDir: string;
   force: boolean;
-  target: Target;
+  iar?: string;
+  eclipse?: string;
+  uvision?: string;
+  greenhills?: string;
 }
 
 function parseArgs(argv: string[]): CliArgs {
-  const positional: string[] = [];
+  let inputDir: string | undefined;
   let force = false;
-  let target: Target | undefined;
+  let iar: string | undefined;
+  let eclipse: string | undefined;
+  let uvision: string | undefined;
+  let greenhills: string | undefined;
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
+
     if (a === "--force" || a === "-f") {
       force = true;
     } else if (a === "-h" || a === "--help") {
       usage();
       process.exit(0);
-    } else if (a === "--target") {
-      const val = argv[++i];
-      if (!val) {
-        console.error("--target requires a value");
-        usage();
-        process.exit(1);
-      }
-      if (!(VALID_TARGETS as string[]).includes(val)) {
-        console.error(`Unknown target: ${val}. Valid targets: ${VALID_TARGETS.join(', ')}`);
-        usage();
-        process.exit(1);
-      }
-      target = val as Target;
+    } else if (a === "--input") {
+      inputDir = argv[++i];
+      if (!inputDir) { console.error("--input requires a value"); usage(); process.exit(1); }
+    } else if (a === "--iar") {
+      iar = argv[++i];
+      if (!iar) { console.error("--iar requires an output directory"); usage(); process.exit(1); }
+    } else if (a === "--eclipse") {
+      eclipse = argv[++i];
+      if (!eclipse) { console.error("--eclipse requires an output directory"); usage(); process.exit(1); }
+    } else if (a === "--uvision") {
+      uvision = argv[++i];
+      if (!uvision) { console.error("--uvision requires an output directory"); usage(); process.exit(1); }
+    } else if (a === "--greenhills") {
+      greenhills = argv[++i];
+      if (!greenhills) { console.error("--greenhills requires an output directory"); usage(); process.exit(1); }
     } else if (a.startsWith("-")) {
       console.error(`Unknown option: ${a}`);
       usage();
       process.exit(1);
     } else {
-      positional.push(a);
+      console.error(`Unexpected positional argument: ${a}`);
+      usage();
+      process.exit(1);
     }
   }
 
-  if (!target) {
-    console.error("--target is required");
+  if (!inputDir) {
+    console.error("--input is required");
     usage();
     process.exit(1);
   }
 
-  if (positional.length !== 3) {
+  if (!iar && !eclipse && !uvision && !greenhills) {
+    console.error("At least one output target (--iar, --eclipse, --uvision, --greenhills) is required");
     usage();
     process.exit(1);
   }
 
-  return {
-    sourceDir: positional[0],
-    buildDir: positional[1],
-    destDir: positional[2],
-    force,
-    target,
-  };
+  return { inputDir, force, iar, eclipse, uvision, greenhills };
 }
 
 function usage(): void {
-  console.error(
-    "Usage: cmod --target <TARGET> [--force] <cmake-source-dir> <cmake-build-dir> <output-dir>",
-  );
+  console.error("Usage: cmod --input <cmake-source-dir> [--iar <output-dir>] [--eclipse <output-dir>]");
+  console.error("             [--uvision <output-dir>] [--greenhills <output-dir>] [--force]");
   console.error("");
-  console.error(`  --target <TARGET>     IDE target to generate for: ${VALID_TARGETS.join(', ')}`);
-  console.error("  <cmake-source-dir>    root of the CMake project's source tree");
-  console.error("  <cmake-build-dir>     CMake build directory to create (must not exist or be empty)");
-  console.error("  <output-dir>          directory to populate with IDE project files (must not exist or be empty)");
-  console.error("  --force, -f           delete <cmake-build-dir> and <output-dir> first if they exist");
+  console.error("  --input <cmake-source-dir>    root of the CMake project's source tree");
+  console.error("  --iar <output-dir>            generate an IAR workspace in <output-dir>");
+  console.error("  --eclipse <output-dir>        generate Eclipse projects in <output-dir>");
+  console.error("  --uvision <output-dir>        generate a uVision project in <output-dir> (not yet implemented)");
+  console.error("  --greenhills <output-dir>     generate a Green Hills project in <output-dir> (not yet implemented)");
+  console.error("  --force, -f                   delete output directories first if they exist");
 }
 
 async function isEmpty(dir: string): Promise<boolean> {
@@ -146,82 +147,129 @@ function runCommand(cmd: string, args: string[], cwd: string): Promise<void> {
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
-  const sourceDir = path.resolve(args.sourceDir);
-  const buildDir = path.resolve(args.buildDir);
-  const destDir = path.resolve(args.destDir);
+  const sourceDir = path.resolve(args.inputDir);
 
-  const toolchainFiles: Record<Target, string> = {
+  const toolchainFiles: Record<string, string> = {
     iar: path.join(sourceDir, "toolchains", "iar.cmake"),
     eclipse: path.join(sourceDir, "toolchains", "gcc.cmake"),
+    uvision: path.join(sourceDir, "toolchains", "gcc.cmake"),
+    greenhills: path.join(sourceDir, "toolchains", "gcc.cmake"),
   };
-  const toolchainFile = toolchainFiles[args.target];
 
   console.log(`Source dir:  ${sourceDir}`);
-  console.log(`Build dir:   ${buildDir}`);
-  console.log(`Output dir:  ${destDir}`);
-  console.log(`Target:      ${args.target}`);
 
   if (!(await exists(sourceDir))) {
     throw new Error(`CMake source directory does not exist: ${sourceDir}`);
   }
 
-  console.log(`Toolchain file: ${toolchainFile}`);
-  if (!(await exists(toolchainFile))) {
-    throw new Error(`Toolchain file does not exist: ${toolchainFile}`);
+  // Collect the backends to run and validate their toolchains / output dirs up-front
+  type BackendEntry = { name: string; destDir: string; toolchainFile: string };
+  const backends: BackendEntry[] = [];
+
+  for (const name of ["iar", "eclipse", "uvision", "greenhills"] as const) {
+    const rawDest = args[name];
+    if (!rawDest) continue;
+
+    if (name === "uvision" || name === "greenhills") {
+      console.warn(`Warning: --${name} is not yet implemented and will be skipped.`);
+      continue;
+    }
+
+    const destDir = path.resolve(rawDest);
+    const toolchainFile = toolchainFiles[name];
+
+    console.log(`  [${name}] output dir:    ${destDir}`);
+    console.log(`  [${name}] toolchain:     ${toolchainFile}`);
+
+    if (!(await exists(toolchainFile))) {
+      throw new Error(`Toolchain file does not exist: ${toolchainFile}`);
+    }
+
+    await prepareEmptyDir(destDir, args.force, `[${name}] Output directory`);
+    backends.push({ name, destDir, toolchainFile });
   }
 
-  await prepareEmptyDir(buildDir, args.force, "Build directory");
-  await prepareEmptyDir(destDir, args.force, "Output directory");
-
-  const queryDir = path.join(buildDir, ".cmake", "api", "v1", "query");
-  console.log(`Creating CMake File API query dir: ${queryDir}`);
-  await fs.mkdir(queryDir, { recursive: true });
-  await fs.writeFile(path.join(queryDir, "codemodel-v2"), "");
-
-  console.log(`Running cmake in ${buildDir} ...`);
-  await runCommand(
-    "cmake",
-    [
-      "-G",
-      "Ninja",
-      `-DCMAKE_TOOLCHAIN_FILE=${toolchainFile}`,
-      "-S",
-      sourceDir,
-      "-B",
-      buildDir,
-    ],
-    process.cwd(),
-  );
-
-  const replyDir = path.join(buildDir, ".cmake", "api", "v1", "reply");
-  if (!(await exists(replyDir))) {
-    throw new Error(`CMake did not produce a reply directory: ${replyDir}`);
+  if (backends.length === 0) {
+    throw new Error("No implemented backends to run.");
   }
 
-  console.log(`Reading CMake model from ${replyDir} ...`);
-  const model = await CMakeFileApiReader.read(replyDir);
-  const cfg = model.defaultConfiguration;
-  if (!cfg) throw new Error("No configurations in CMake model");
-  console.log(
-    `  ${cfg.targets.length} targets in configuration '${cfg.name || "default"}'`,
-  );
-  for (const t of cfg.targets) {
-    console.log(`    target: ${t.name} (${t.type})`);
+  // Single CMake configure into a shared temp build dir
+  const buildDir = await fs.mkdtemp(path.join(os.tmpdir(), "cmod-build-"));
+  console.log(`Build dir:   ${buildDir} (temporary)`);
+
+  const cleanup = async () => {
+    try {
+      await fs.rm(buildDir, { recursive: true, force: true });
+      console.log(`Removed temporary build dir: ${buildDir}`);
+    } catch {
+      // best-effort cleanup
+    }
+  };
+
+  for (const sig of ["SIGINT", "SIGTERM"] as NodeJS.Signals[]) {
+    process.once(sig, async () => {
+      await cleanup();
+      process.exit(1);
+    });
   }
 
-  if (args.target === 'iar') {
-    console.log(`Generating IAR workspace in ${destDir} ...`);
-    const generator = new IarGenerator(model, { sourceDir, destDir });
-    const result = await generator.generate();
-    console.log(`Done. Wrote workspace: ${path.resolve(result.workspaceFile)}`);
-    console.log(`  Projects (${result.projects.length}):`);
-    for (const p of result.projects) console.log(`    - ${p}`);
-  } else if (args.target === 'eclipse') {
-    console.log(`Generating Eclipse projects in ${destDir} ...`);
-    const generator = new EclipseGenerator(model, { sourceDir, destDir });
-    const files = await generator.generate();
-    console.log(`Done. Wrote ${files.length} Eclipse project file(s):`);
-    for (const f of files) console.log(`    - ${f}`);
+  try {
+    // Run one cmake configure per backend (each needs its own toolchain)
+    for (const backend of backends) {
+      const backendBuildDir = path.join(buildDir, backend.name);
+
+      const queryDir = path.join(backendBuildDir, ".cmake", "api", "v1", "query");
+      console.log(`\n[${backend.name}] Configuring CMake ...`);
+      await fs.mkdir(queryDir, { recursive: true });
+      await fs.writeFile(path.join(queryDir, "codemodel-v2"), "");
+
+      await runCommand(
+        "cmake",
+        [
+          "-G",
+          "Ninja",
+          `-DCMAKE_TOOLCHAIN_FILE=${backend.toolchainFile}`,
+          "-S",
+          sourceDir,
+          "-B",
+          backendBuildDir,
+        ],
+        process.cwd(),
+      );
+
+      const replyDir = path.join(backendBuildDir, ".cmake", "api", "v1", "reply");
+      if (!(await exists(replyDir))) {
+        throw new Error(`CMake did not produce a reply directory: ${replyDir}`);
+      }
+
+      console.log(`[${backend.name}] Reading CMake model ...`);
+      const model = await CMakeFileApiReader.read(replyDir);
+      const cfg = model.defaultConfiguration;
+      if (!cfg) throw new Error(`No configurations in CMake model for ${backend.name}`);
+      console.log(
+        `[${backend.name}]   ${cfg.targets.length} targets in configuration '${cfg.name || "default"}'`,
+      );
+      for (const t of cfg.targets) {
+        console.log(`[${backend.name}]     target: ${t.name} (${t.type})`);
+      }
+
+      if (backend.name === "iar") {
+        console.log(`[iar] Generating IAR workspace in ${backend.destDir} ...`);
+        const generator = new IarGenerator(model, { sourceDir, destDir: backend.destDir });
+        const result = await generator.generate();
+        console.log(`[iar] Done. Wrote workspace: ${path.resolve(result.workspaceFile)}`);
+        console.log(`[iar]   Projects (${result.projects.length}):`);
+        for (const p of result.projects) console.log(`[iar]     - ${p}`);
+      } else if (backend.name === "eclipse") {
+        console.log(`[eclipse] Generating Eclipse projects in ${backend.destDir} ...`);
+        const generator = new EclipseGenerator(model, { sourceDir, destDir: backend.destDir });
+        const files = await generator.generate();
+        console.log(`[eclipse] Done. Wrote ${files.length} Eclipse project file(s):`);
+        for (const f of files) console.log(`[eclipse]   - ${f}`);
+      }
+    }
+  } finally {
+    await cleanup();
   }
 }
 
