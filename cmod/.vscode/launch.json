@@ -15,7 +15,7 @@
       ],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
-      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
     },
     {
       "name": "CMake->Eclipse",
@@ -31,7 +31,7 @@
       ],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
-      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
     }    
   ],
   "inputs": [

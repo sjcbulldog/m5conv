@@ -1,37 +1,15 @@
 import { xmlEscape } from '../iar/xml.js';
 
-export interface LinkedResource {
-  /** Workspace-relative name shown in the Eclipse Project Explorer. */
-  name: string;
-  /** Absolute filesystem path (forward slashes). */
-  absPath: string;
-}
-
 /**
- * Renders a `.project` file for an Eclipse CDT managed-build project.
+ * Renders a `.project` file for an Eclipse cmake4eclipse project.
  *
- * @param name    Eclipse project name
- * @param links   Linked virtual folders pointing at source directories
+ * cmake4eclipse drives all build activity; Eclipse CDT provides
+ * indexing and tooling only.
+ *
+ * @param name  Eclipse project name (must match the directory name in the workspace)
  */
-export function renderProject(name: string, links: LinkedResource[]): string {
-  const linkedResourcesXml =
-    links.length === 0
-      ? ''
-      : [
-          '\t<linkedResources>',
-          ...links.map((l) =>
-            [
-              '\t\t<link>',
-              `\t\t\t<name>${xmlEscape(l.name)}</name>`,
-              '\t\t\t<type>2</type>',
-              `\t\t\t<location>${xmlEscape(l.absPath.replace(/\\/g, '/'))}</location>`,
-              '\t\t</link>',
-            ].join('\n'),
-          ),
-          '\t</linkedResources>',
-        ].join('\n');
-
-  const parts = [
+export function renderProject(name: string): string {
+  return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<projectDescription>',
     `\t<name>${xmlEscape(name)}</name>`,
@@ -40,28 +18,17 @@ export function renderProject(name: string, links: LinkedResource[]): string {
     '\t</projects>',
     '\t<buildSpec>',
     '\t\t<buildCommand>',
-    '\t\t\t<name>org.eclipse.cdt.managedbuilder.core.genmakebuilder</name>',
-    '\t\t\t<triggers>clean,full,incremental,</triggers>',
-    '\t\t\t<arguments>',
-    '\t\t\t</arguments>',
-    '\t\t</buildCommand>',
-    '\t\t<buildCommand>',
-    '\t\t\t<name>org.eclipse.cdt.managedbuilder.core.ScannerConfigBuilder</name>',
-    '\t\t\t<triggers>full,incremental,</triggers>',
+    '\t\t\t<name>de.marw.cmake4eclipse.mbs.genscriptbuilder</name>',
     '\t\t\t<arguments>',
     '\t\t\t</arguments>',
     '\t\t</buildCommand>',
     '\t</buildSpec>',
     '\t<natures>',
+    '\t\t<nature>de.marw.cmake4eclipse.mbs.cmake4eclipsenature</nature>',
     '\t\t<nature>org.eclipse.cdt.core.cnature</nature>',
     '\t\t<nature>org.eclipse.cdt.core.ccnature</nature>',
-    '\t\t<nature>org.eclipse.cdt.managedbuilder.core.managedBuildNature</nature>',
-    '\t\t<nature>org.eclipse.cdt.managedbuilder.core.ScannerConfigNature</nature>',
     '\t</natures>',
-  ];
-
-  if (linkedResourcesXml) parts.push(linkedResourcesXml);
-  parts.push('</projectDescription>', '');
-
-  return parts.join('\n');
+    '</projectDescription>',
+    '',
+  ].join('\n');
 }

@@ -2,7 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "MTB->MTB5",
+            "name": "MTB->CMake",
             "type": "node",
             "request": "launch",
             "program": "${workspaceFolder}/src/index.ts",

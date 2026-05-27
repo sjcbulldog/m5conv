@@ -2337,11 +2337,11 @@ export function generateTopLevelCMakeLists(
         lines.push(')') ;
         lines.push('') ;
         lines.push('add_custom_target(') ;
-        lines.push('    SignCombine ALL') ;
+        lines.push('    SignedImage ALL') ;
         lines.push(`    DEPENDS ${outputVar}`) ;
         lines.push(')') ;
         const elfDeps = sorted.map(p => `${p}.elf`).join(' ') ;
-        lines.push(`add_dependencies(SignCombine ${elfDeps})`) ;
+        lines.push(`add_dependencies(SignedImage ${elfDeps})`) ;
         lines.push('') ;
     }
 

@@ -8,7 +8,7 @@ import { IarGenerator } from "./iar/index.js";
 import { EclipseGenerator } from "./eclipse/index.js";
 
 interface CliArgs {
-  inputDir: string;
+  inputDir?: string;   // optional — not required when only --eclipse is specified
   force: boolean;
   iar?: string;
   eclipse?: string;
@@ -58,14 +58,16 @@ function parseArgs(argv: string[]): CliArgs {
     }
   }
 
-  if (!inputDir) {
-    console.error("--input is required");
+  if (!iar && !eclipse && !uvision && !greenhills) {
+    console.error("At least one output target (--iar, --eclipse, --uvision, --greenhills) is required");
     usage();
     process.exit(1);
   }
 
-  if (!iar && !eclipse && !uvision && !greenhills) {
-    console.error("At least one output target (--iar, --eclipse, --uvision, --greenhills) is required");
+  // --input is required for all backends except --eclipse-only (in-place mode)
+  const needsNonEclipseBackend = iar || uvision || greenhills;
+  if (!inputDir && needsNonEclipseBackend) {
+    console.error("--input is required when using --iar, --uvision, or --greenhills");
     usage();
     process.exit(1);
   }
@@ -74,15 +76,18 @@ function parseArgs(argv: string[]): CliArgs {
 }
 
 function usage(): void {
-  console.error("Usage: cmod --input <cmake-source-dir> [--iar <output-dir>] [--eclipse <output-dir>]");
+  console.error("Usage: cmod [--input <cmake-source-dir>] [--iar <output-dir>] [--eclipse <eclipse-dir>]");
   console.error("             [--uvision <output-dir>] [--greenhills <output-dir>] [--force]");
   console.error("");
-  console.error("  --input <cmake-source-dir>    root of the CMake project's source tree");
+  console.error("  --input <cmake-source-dir>    root of the CMake project source tree");
   console.error("  --iar <output-dir>            generate an IAR workspace in <output-dir>");
-  console.error("  --eclipse <output-dir>        generate Eclipse projects in <output-dir>");
-  console.error("  --uvision <output-dir>        generate a uVision project in <output-dir> (not yet implemented)");
-  console.error("  --greenhills <output-dir>     generate a Green Hills project in <output-dir> (not yet implemented)");
-  console.error("  --force, -f                   delete output directories first if they exist");
+  console.error("  --eclipse <eclipse-dir>       cmake4eclipse mode:");
+  console.error("                                  without --input: modify cmake project in-place");
+  console.error("                                  with --input:    copy <cmake-source-dir> to");
+  console.error("                                                   <eclipse-dir>, then add Eclipse files");
+  console.error("  --uvision <output-dir>        generate a uVision project (not yet implemented)");
+  console.error("  --greenhills <output-dir>     generate a Green Hills project (not yet implemented)");
+  console.error("  --force, -f                   overwrite output directory if it exists");
 }
 
 async function isEmpty(dir: string): Promise<boolean> {
@@ -122,6 +127,21 @@ async function prepareEmptyDir(dir: string, force: boolean, label: string): Prom
   await fs.mkdir(dir, { recursive: true });
 }
 
+/** Recursively copy all files from srcDir into destDir. */
+async function copyDirRecursive(srcDir: string, destDir: string): Promise<void> {
+  await fs.mkdir(destDir, { recursive: true });
+  const entries = await fs.readdir(srcDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const src = path.join(srcDir, entry.name);
+    const dest = path.join(destDir, entry.name);
+    if (entry.isDirectory()) {
+      await copyDirRecursive(src, dest);
+    } else {
+      await fs.copyFile(src, dest);
+    }
+  }
+}
+
 function runCommand(cmd: string, args: string[], cwd: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
@@ -147,23 +167,31 @@ function runCommand(cmd: string, args: string[], cwd: string): Promise<void> {
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
-  const sourceDir = path.resolve(args.inputDir);
+  const sourceDir = args.inputDir ? path.resolve(args.inputDir) : undefined;
 
   const toolchainFiles: Record<string, string> = {
-    iar: path.join(sourceDir, "toolchains", "iar.cmake"),
-    eclipse: path.join(sourceDir, "toolchains", "gcc.cmake"),
-    uvision: path.join(sourceDir, "toolchains", "gcc.cmake"),
-    greenhills: path.join(sourceDir, "toolchains", "gcc.cmake"),
+    iar: sourceDir ? path.join(sourceDir, "toolchains", "iar.cmake") : "",
+    eclipse: sourceDir ? path.join(sourceDir, "toolchains", "gcc.cmake") : "",
+    uvision: sourceDir ? path.join(sourceDir, "toolchains", "gcc.cmake") : "",
+    greenhills: sourceDir ? path.join(sourceDir, "toolchains", "gcc.cmake") : "",
   };
 
-  console.log(`Source dir:  ${sourceDir}`);
-
-  if (!(await exists(sourceDir))) {
-    throw new Error(`CMake source directory does not exist: ${sourceDir}`);
+  if (sourceDir) {
+    console.log(`Source dir:  ${sourceDir}`);
+    if (!(await exists(sourceDir))) {
+      throw new Error(`CMake source directory does not exist: ${sourceDir}`);
+    }
   }
 
-  // Collect the backends to run and validate their toolchains / output dirs up-front
-  type BackendEntry = { name: string; destDir: string; toolchainFile: string };
+  // Collect the backends to run
+  type BackendEntry = {
+    name: string;
+    /** Directory where IDE files are written (always the eclipse dir or output dir). */
+    destDir: string;
+    toolchainFile: string;
+    /** The CMake source root to configure — equals destDir for eclipse, sourceDir otherwise. */
+    cmakeSourceDir: string;
+  };
   const backends: BackendEntry[] = [];
 
   for (const name of ["iar", "eclipse", "uvision", "greenhills"] as const) {
@@ -176,24 +204,58 @@ async function main(): Promise<void> {
     }
 
     const destDir = path.resolve(rawDest);
+
+    if (name === "eclipse") {
+      const eclipseInPlace = !sourceDir;
+
+      if (eclipseInPlace) {
+        // In-place mode: eclipse dir IS the cmake source root — no copy, no prepareEmptyDir.
+        console.log(`[eclipse] In-place mode: ${destDir}`);
+        if (!(await exists(destDir))) {
+          throw new Error(`Eclipse directory does not exist: ${destDir}`);
+        }
+        const toolchainFile = path.join(destDir, "toolchains", "gcc.cmake");
+        console.log(`  [eclipse] toolchain: ${toolchainFile}`);
+        if (!(await exists(toolchainFile))) {
+          throw new Error(`Toolchain file does not exist: ${toolchainFile}`);
+        }
+        backends.push({ name, destDir, toolchainFile, cmakeSourceDir: destDir });
+      } else {
+        // Copy mode: copy source tree to destDir, then treat destDir as the cmake source.
+        console.log(`  [eclipse] output dir: ${destDir}`);
+        const toolchainFile = toolchainFiles[name];
+        console.log(`  [eclipse] toolchain:  ${toolchainFile}`);
+        if (!(await exists(toolchainFile))) {
+          throw new Error(`Toolchain file does not exist: ${toolchainFile}`);
+        }
+        await prepareEmptyDir(destDir, args.force, "[eclipse] Output directory");
+        console.log(`[eclipse] Copying source tree: ${sourceDir} → ${destDir}`);
+        await copyDirRecursive(sourceDir!, destDir);
+        backends.push({ name, destDir, toolchainFile: path.join(destDir, "toolchains", "gcc.cmake"), cmakeSourceDir: destDir });
+      }
+      continue;
+    }
+
+    // Non-eclipse backends — sourceDir is always required (validated in parseArgs)
+    const destDirResolved = destDir;
     const toolchainFile = toolchainFiles[name];
 
-    console.log(`  [${name}] output dir:    ${destDir}`);
+    console.log(`  [${name}] output dir:    ${destDirResolved}`);
     console.log(`  [${name}] toolchain:     ${toolchainFile}`);
 
     if (!(await exists(toolchainFile))) {
       throw new Error(`Toolchain file does not exist: ${toolchainFile}`);
     }
 
-    await prepareEmptyDir(destDir, args.force, `[${name}] Output directory`);
-    backends.push({ name, destDir, toolchainFile });
+    await prepareEmptyDir(destDirResolved, args.force, `[${name}] Output directory`);
+    backends.push({ name, destDir: destDirResolved, toolchainFile, cmakeSourceDir: sourceDir! });
   }
 
   if (backends.length === 0) {
     throw new Error("No implemented backends to run.");
   }
 
-  // Single CMake configure into a shared temp build dir
+  // Single cmake configure per backend into a shared temp build dir
   const buildDir = await fs.mkdtemp(path.join(os.tmpdir(), "cmod-build-"));
   console.log(`Build dir:   ${buildDir} (temporary)`);
 
@@ -214,12 +276,11 @@ async function main(): Promise<void> {
   }
 
   try {
-    // Run one cmake configure per backend (each needs its own toolchain)
     for (const backend of backends) {
       const backendBuildDir = path.join(buildDir, backend.name);
 
       const queryDir = path.join(backendBuildDir, ".cmake", "api", "v1", "query");
-      console.log(`\n[${backend.name}] Configuring CMake ...`);
+      console.log(`\n[${backend.name}] Configuring CMake from ${backend.cmakeSourceDir} ...`);
       await fs.mkdir(queryDir, { recursive: true });
       await fs.writeFile(path.join(queryDir, "codemodel-v2"), "");
 
@@ -230,7 +291,7 @@ async function main(): Promise<void> {
           "Ninja",
           `-DCMAKE_TOOLCHAIN_FILE=${backend.toolchainFile}`,
           "-S",
-          sourceDir,
+          backend.cmakeSourceDir,
           "-B",
           backendBuildDir,
         ],
@@ -255,14 +316,14 @@ async function main(): Promise<void> {
 
       if (backend.name === "iar") {
         console.log(`[iar] Generating IAR workspace in ${backend.destDir} ...`);
-        const generator = new IarGenerator(model, { sourceDir, destDir: backend.destDir });
+        const generator = new IarGenerator(model, { sourceDir: sourceDir!, destDir: backend.destDir });
         const result = await generator.generate();
         console.log(`[iar] Done. Wrote workspace: ${path.resolve(result.workspaceFile)}`);
         console.log(`[iar]   Projects (${result.projects.length}):`);
         for (const p of result.projects) console.log(`[iar]     - ${p}`);
       } else if (backend.name === "eclipse") {
-        console.log(`[eclipse] Generating Eclipse projects in ${backend.destDir} ...`);
-        const generator = new EclipseGenerator(model, { sourceDir, destDir: backend.destDir });
+        console.log(`[eclipse] Generating Eclipse files in ${backend.destDir} ...`);
+        const generator = new EclipseGenerator(model, { sourceDir: backend.cmakeSourceDir, destDir: backend.destDir });
         const files = await generator.generate();
         console.log(`[eclipse] Done. Wrote ${files.length} Eclipse project file(s):`);
         for (const f of files) console.log(`[eclipse]   - ${f}`);
