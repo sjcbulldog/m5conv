@@ -2,27 +2,21 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Fetch: BSP filter",
-      "type": "node",
-      "request": "launch",
-      "program": "${workspaceFolder}/dist/index.js",
-      "args": ["--output", "./mtb-assets", "--bsp-file", "bsplist.json"],
-      "cwd": "${workspaceFolder}",
-      "preLaunchTask": "Build",
-      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
-      "sourceMaps": true,
-      "console": "integratedTerminal"
-    },
-    {
-      "name": "Fetch: Force, BSP filter + create-json-desc",
+      "name": "Test Edge One Example",
       "type": "node",
       "request": "launch",
       "program": "${workspaceFolder}/dist/index.js",
       "args": [
-        "--force",
-        "--output", "../work/edgesdk",
-        "--bsp-file", "bsplist.json",
-        "--create-json-desc"
+        "--limit=1",
+        "--include=mtb-example-psoc-edge-wifi-scan",
+        "--bsps=KIT_PSE84_AI,KIT_PSE84_EVAL_EPC2",
+        "--mtbdir=C:/sdk/mtb",
+        "--cmakedir=C:/sdk/cmake",
+        "--status=C:/sdk/status.json",
+        "--project-creator=C:/users/butch/ModusToolbox/tools_3.8/project-creator/project-creator-cli.exe",
+        "--mtb2cmake=C:/m5conv/bin/mtb2cmake.exe",
+        "--depends=C:/m5conv/conv/depends.json",
+        "--logs=C:/sdk/logs"
       ],
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "Build",
@@ -31,28 +25,24 @@
       "console": "integratedTerminal"
     },
     {
-      "name": "Fetch: BSP filter --force",
+      "name": "Run All Examples",
       "type": "node",
       "request": "launch",
       "program": "${workspaceFolder}/dist/index.js",
-      "args": ["--output", "./mtb-assets", "--bsp-file", "bsplist.json", "--force"],
+      "args": [
+        "--bsps=KIT_PSE84_AI,KIT_PSE84_EVAL_EPC2",
+        "--mtbdir=C:/sdk/mtb",
+        "--cmakedir=C:/sdk/cmake",
+        "--status=C:/sdk/status.json",
+        "--project-creator=C:/users/butch/ModusToolbox/tools_3.8/project-creator/project-creator-cli.exe",
+        "--mtb2cmake=C:/m5conv/bin/mtb2cmake.exe",
+        "--depends=C:/m5conv/conv/depends.json"
+      ],
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "Build",
       "outFiles": ["${workspaceFolder}/dist/**/*.js"],
       "sourceMaps": true,
       "console": "integratedTerminal"
-    },
-    {
-      "name": "create-json-desc only",
-      "type": "node",
-      "request": "launch",
-      "program": "${workspaceFolder}/dist/index.js",
-      "args": ["--output", "./mtb-assets", "--create-json-desc"],
-      "cwd": "${workspaceFolder}",
-      "preLaunchTask": "Build",
-      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
-      "sourceMaps": true,
-      "console": "integratedTerminal"
-    }
+    },    
   ]
 }

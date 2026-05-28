@@ -658,6 +658,33 @@
         ]
     },
     {
+        "name": "mqtt",
+        "exports": [
+            "include"
+        ],
+        "imports": [
+            "connectivity-utilities",
+            "lwip",
+            "lwip-freertos-integration",
+            "lwip-network-interface-integration",
+            "wifi-core-freertos-lwip-mbedtls",
+            "wifi-host-driver",
+            "whd-bsp-integration",
+            "ifx-mbedtls",
+            "cy-mbedtls-acceleration",
+            "abstraction-rtos",
+            "freertos",
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "mtb-ipc",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ]
+    },
+    {
         "name" : "aws-iot-devcie-sdk-port",
         "exports" : [
             "include"

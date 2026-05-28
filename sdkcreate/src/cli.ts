@@ -1,93 +1,101 @@
 export interface CliArgs {
-  superManifestSources: string[];
-  outputDir: string;
-  bspFile: string | undefined;
-  createJsonDesc: boolean;
-  force: boolean;
+    bsps: string[];
+    mtbdir: string;
+    cmakedir: string;
+    status: string;
+    logs: string;
+    projectCreator: string;
+    mtb2cmake: string;
+    depends: string;
+    limit?: number;
+    include?: string[];
+}
+
+function printUsage(): void {
+    console.log(`Usage: sdkcreate [options]
+
+Required options:
+  --bsps=BSP1,BSP2,...        Comma-separated list of BSP IDs
+  --mtbdir=DIR                Directory where MTB projects are created
+  --cmakedir=DIR              Directory where cmake projects are placed
+  --status=FILE               JSON results file path
+  --logs=DIR                  Directory where per-step log files are written
+  --project-creator=PATH      Path to project-creator-cli.exe
+  --mtb2cmake=PATH            Path to mtb2cmake.exe
+  --depends=PATH              Path to depends.json (passed to mtb2cmake)
+
+Optional options:
+  --limit=INTEGER             Limit the number of code examples per BSP (for testing)
+  --include=NAME              Always include this code example when using --limit;
+                              may be specified multiple times
+
+  --help                      Show this help message
+`);
 }
 
 export function parseArgs(argv: string[]): CliArgs {
-  const args = argv.slice(2);
-  const result: Partial<CliArgs> & Omit<CliArgs, "outputDir"> = {
-    superManifestSources: [],
-    outputDir: undefined as unknown as string,
-    bspFile: undefined,
-    createJsonDesc: false,
-    force: false,
-  };
+    const args = argv.slice(2);
+    const result: Partial<CliArgs> = {};
 
-  let i = 0;
-  while (i < args.length) {
-    const arg = args[i];
-    if (arg === "--output" || arg === "-o") {
-      i++;
-      if (i >= args.length) {
-        throw new Error(`${arg} requires a directory argument.`);
-      }
-      result.outputDir = args[i];
-    } else if (arg === "--bsp-file") {
-      i++;
-      if (i >= args.length) {
-        throw new Error(`${arg} requires a file path argument.`);
-      }
-      result.bspFile = args[i];
-    } else if (arg === "--create-json-desc") {
-      result.createJsonDesc = true;
-    } else if (arg === "--force" || arg === "-f") {
-      result.force = true;
-    } else if (arg === "--help" || arg === "-h") {
-      printUsage();
-      process.exit(0);
-    } else if (!arg.startsWith("-")) {
-      result.superManifestSources.push(arg);
-    } else {
-      throw new Error(`Unknown argument: ${arg}\nRun with --help for usage.`);
+    for (const arg of args) {
+        if (arg === '--help' || arg === '-h') {
+            printUsage();
+            process.exit(0);
+        } else if (arg.startsWith('--bsps=')) {
+            result.bsps = arg.slice('--bsps='.length).split(',').map(s => s.trim()).filter(s => s.length > 0);
+        } else if (arg.startsWith('--mtbdir=')) {
+            result.mtbdir = arg.slice('--mtbdir='.length);
+        } else if (arg.startsWith('--cmakedir=')) {
+            result.cmakedir = arg.slice('--cmakedir='.length);
+        } else if (arg.startsWith('--status=')) {
+            result.status = arg.slice('--status='.length);
+        } else if (arg.startsWith('--logs=')) {
+            result.logs = arg.slice('--logs='.length);
+        } else if (arg.startsWith('--project-creator=')) {
+            result.projectCreator = arg.slice('--project-creator='.length);
+        } else if (arg.startsWith('--mtb2cmake=')) {
+            result.mtb2cmake = arg.slice('--mtb2cmake='.length);
+        } else if (arg.startsWith('--depends=')) {
+            result.depends = arg.slice('--depends='.length);
+        } else if (arg.startsWith('--limit=')) {
+            const val = parseInt(arg.slice('--limit='.length), 10);
+            if (isNaN(val) || val < 1) {
+                console.error(`Error: --limit must be a positive integer`);
+                printUsage();
+                process.exit(1);
+            }
+            result.limit = val;
+        } else if (arg.startsWith('--include=')) {
+            const name = arg.slice('--include='.length);
+            if (!result.include) {
+                result.include = [];
+            }
+            result.include.push(name);
+        } else {
+            console.error(`Unknown argument: ${arg}`);
+            printUsage();
+            process.exit(1);
+        }
     }
-    i++;
-  }
 
-  if (!result.outputDir) {
-    throw new Error(
-      "--output <dir> is required.\nRun with --help for usage.",
-    );
-  }
+    const required: (keyof CliArgs)[] = ['bsps', 'mtbdir', 'cmakedir', 'status', 'logs', 'projectCreator', 'mtb2cmake', 'depends'];
+    const argNames: Partial<Record<keyof CliArgs, string>> = {
+        bsps: '--bsps',
+        mtbdir: '--mtbdir',
+        cmakedir: '--cmakedir',
+        status: '--status',
+        logs: '--logs',
+        projectCreator: '--project-creator',
+        mtb2cmake: '--mtb2cmake',
+        depends: '--depends',
+    };
+    for (const key of required) {
+        if (!result[key]) {
+            console.error(`Error: ${argNames[key]} is required`);
+            printUsage();
+            process.exit(1);
+        }
+    }
 
-  return result as CliArgs;
-}
-
-export function printUsage(): void {
-  console.log(`\
-Usage: node dist/index.js --output <dir> [options] [superManifest...]
-
-Required:
-  --output, -o <dir>      Target directory for fetched assets.
-
-Options:
-  --bsp-file <file>       JSON file containing a list of BSP IDs to target.
-                          Only assets compatible with those BSPs are fetched.
-                          Implies latest pinned release per asset.
-  --create-json-desc      After fetching, scan each example in <dir>/examples/
-                          and write a deps.json listing required middleware
-                          for each project version.
-  --force, -f             Delete and recreate the target directory if it exists
-                          (only relevant when --bsp-file is used).
-  --help, -h              Show this help message
-
-Arguments:
-  superManifest           Super manifest URL or file path (repeatable).
-                          Defaults to the ModusToolbox v2 super manifest.
-
-Examples:
-  # Fetch assets filtered to BSPs in bsplist.json
-  node dist/index.js --output ./mtb-assets --bsp-file bsplist.json
-
-  # Fetch and also generate per-example dependency JSON files
-  node dist/index.js --output ./mtb-assets --bsp-file bsplist.json --create-json-desc
-
-  # Only generate dependency JSON for an already-fetched output directory
-  node dist/index.js --output ./mtb-assets --create-json-desc
-
-  # Force-overwrite the output directory
-  node dist/index.js --output ./mtb-assets --bsp-file bsplist.json --force
-`);
+    return result as CliArgs;
 }

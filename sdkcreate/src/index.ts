@@ -1,50 +1,53 @@
-import { parseArgs } from "./cli";
-import { loadModusToolboxCatalog } from "./modustoolbox-manifests";
-import { findGit } from "./git-finder";
-import { fetchAssets } from "./asset-fetcher";
-import { filterCatalogByBsps, loadBspIds } from "./bsp-filter";
-import { createJsonDesc } from "./json-desc";
+import { parseArgs } from './cli';
+import { StatusTracker } from './status';
+import { runPhase1 } from './phase1';
+import { runPhase2 } from './phase2';
+import { runPhase3 } from './phase3';
+import * as fs from 'fs';
 
 async function main(): Promise<void> {
-  const args = parseArgs(process.argv);
+    const args = parseArgs(process.argv);
+    const status = new StatusTracker(args.status);
 
-  if (args.bspFile) {
-    const catalog = await loadModusToolboxCatalog({
-      superManifestSources: args.superManifestSources,
+    // Clear and recreate the logs directory
+    if (fs.existsSync(args.logs)) {
+        fs.rmSync(args.logs, { recursive: true, force: true });
+    }
+    fs.mkdirSync(args.logs, { recursive: true });
+
+    // Phase 1: create MTB projects
+    const phase1Succeeded = await runPhase1({
+        bsps: args.bsps,
+        mtbdir: args.mtbdir,
+        projectCreator: args.projectCreator,
+        logDir: args.logs,
+        status,
+        limit: args.limit,
+        include: args.include,
     });
 
-    const bspIds = await loadBspIds(args.bspFile);
-    console.log(
-      `Filtering catalog to ${bspIds.length} BSP(s) from ${args.bspFile}`,
-    );
-    const filtered = filterCatalogByBsps(catalog, bspIds);
-    console.log(
-      `  BSPs: ${filtered.bsps.length}  |  ` +
-        `Middleware: ${filtered.middleware.length}  |  ` +
-        `Code examples: ${filtered.codeExamples.length}`,
-    );
-
-    const gitPath = await findGit();
-    console.log(`Using git: ${gitPath}`);
-
-    await fetchAssets({
-      bsps: filtered.bsps,
-      middleware: filtered.middleware,
-      codeExamples: filtered.codeExamples,
-      targetDir: args.outputDir,
-      gitPath,
-      force: args.force,
-      latestOnly: true,
+    // Phase 2: convert to cmake
+    const phase2Succeeded = await runPhase2({
+        pairs: phase1Succeeded,
+        mtbdir: args.mtbdir,
+        cmakedir: args.cmakedir,
+        mtb2cmake: args.mtb2cmake,
+        depends: args.depends,
+        logDir: args.logs,
+        status,
     });
-  }
 
-  if (args.createJsonDesc) {
-    await createJsonDesc(args.outputDir);
-  }
+    // Phase 3: cmake + ninja
+    await runPhase3({
+        pairs: phase2Succeeded,
+        cmakedir: args.cmakedir,
+        logDir: args.logs,
+        status,
+    });
 }
 
-void main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(`Error: ${message}`);
-  process.exitCode = 1;
+main().catch((err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`Fatal error: ${msg}`);
+    process.exit(1);
 });
