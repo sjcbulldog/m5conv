@@ -127,7 +127,7 @@ function mappedResources(projectName: string): string {
  * Flash-write is performed by OpenOCD at debug session start.
  * Always generates a standalone (single-core) configuration.
  */
-function buildOpenocdServerOther(inp: LaunchConfigInput): string {
+function buildOpenocdServerOther(inp: LaunchConfigInput, target: LaunchTarget): string {
   const proj = projectLoc(inp);
   const bspGenSrc = `${proj}/${inp.bspRelPath}/config/GeneratedSource`;
   const flmArg = inp.flmRelPath
@@ -137,6 +137,8 @@ function buildOpenocdServerOther(inp: LaunchConfigInput): string {
     ? `${proj}/${inp.debugCertRelPath}`
     : `${proj}/packets/debug_token.bin`;
 
+  const isCm55 = coreNameForTarget(target) === 'cm55';
+
   const lines: string[] = [
     `-s "${bspGenSrc}"`,
     `-c "set QSPI_FLASHLOADER ${flmArg}"`,
@@ -144,21 +146,28 @@ function buildOpenocdServerOther(inp: LaunchConfigInput): string {
     `-c "source [find interface/kitprog3.cfg]"`,
     `-c "transport select swd"`,
     `-c "puts stderr {Started by GNU MCU Eclipse}"`,
-    `-c "source [find ${inp.openocdTargetCfg}]"`,
-    `-c "cat1d.cm33 configure -rtos auto -rtos-wipe-on-reset-halt 1"`,
+  ];
+
+  if (isCm55) {
+    lines.push(`-c "set ENABLE_CM55 1"`);
+    lines.push(`-c "gdb_port 3332"`);
+  }
+
+  lines.push(`-c "source [find ${inp.openocdTargetCfg}]"`);
+
+  if (isCm55) {
+    lines.push(`-c "cat1d.cm55 configure -rtos auto -rtos-wipe-on-reset-halt 0"`);
+  } else {
+    lines.push(`-c "cat1d.cm33 configure -rtos auto -rtos-wipe-on-reset-halt 1"`);
+  }
+
+  lines.push(
     `-c "gdb_breakpoint_override hard"`,
     `-c "init; reset init;adapter speed 12000; flash write_image erase ${combinedHexPath(inp)}"`,
     `-c "reset init;"`,
-  ];
+  );
 
   return lines.join('\r\n');
-}
-
-/**
- * Returns the GDB `otherRunCommands` string for a standalone single-core debug session.
- */
-function buildOtherRunCommands(): string {
-  return `monitor reset_halt cm33`;
 }
 
 /**
@@ -174,6 +183,12 @@ export function renderDebugLaunch(inp: LaunchConfigInput, primary: LaunchTarget)
   const svdArg = inp.svdRelPath
     ? `${projectLoc(inp)}/${inp.svdRelPath}`
     : '';
+
+  const isCm55 = coreNameForTarget(primary) === 'cm55';
+  const gdbPort = isCm55 ? 3332 : 3333;
+  const coreName = coreNameForTarget(primary);
+  const initCmd = isCm55 ? `monitor reset_halt ${coreName}` : '';
+  const runCmd = `monitor reset_halt ${coreName}`;
 
   const memoryBlocksXml =
     '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\r\n' +
@@ -198,15 +213,14 @@ export function renderDebugLaunch(inp: LaunchConfigInput, primary: LaunchTarget)
     I + xmlAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.gdbClientOtherOptions', ''),
     I + xmlAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.gdbServerConnectionAddress', ''),
     I + xmlAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.gdbServerExecutable', 'openocd'),
-    I + intAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.gdbServerGdbPortNumber', 3333),
+    I + intAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.gdbServerGdbPortNumber', gdbPort),
     I + xmlAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.gdbServerLog', ''),
     I + xmlAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.gdbServerOther',
-      buildOpenocdServerOther(inp)),
+      buildOpenocdServerOther(inp, primary)),
     I + xmlAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.gdbServerTclPortNumber', '6666'),
     I + intAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.gdbServerTelnetPortNumber', 4444),
-    I + xmlAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.otherInitCommands', ''),
-    I + xmlAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.otherRunCommands',
-      buildOtherRunCommands()),
+    I + xmlAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.otherInitCommands', initCmd),
+    I + xmlAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.otherRunCommands', runCmd),
     I + xmlAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.secondResetType', 'init'),
     // ilg.gnumcueclipse.debug.gdbjtag.svdPath (conditional)
     ...(svdArg ? [I + xmlAttr('ilg.gnumcueclipse.debug.gdbjtag.svdPath', svdArg)] : []),
@@ -218,7 +232,7 @@ export function renderDebugLaunch(inp: LaunchConfigInput, primary: LaunchTarget)
     I + boolAttr('org.eclipse.cdt.debug.gdbjtag.core.loadImage', false),
     I + boolAttr('org.eclipse.cdt.debug.gdbjtag.core.loadSymbols', true),
     I + xmlAttr('org.eclipse.cdt.debug.gdbjtag.core.pcRegister', ''),
-    I + intAttr('org.eclipse.cdt.debug.gdbjtag.core.portNumber', 3333),
+    I + intAttr('org.eclipse.cdt.debug.gdbjtag.core.portNumber', gdbPort),
     I + boolAttr('org.eclipse.cdt.debug.gdbjtag.core.setPcRegister', false),
     I + boolAttr('org.eclipse.cdt.debug.gdbjtag.core.setResume', false),
     I + boolAttr('org.eclipse.cdt.debug.gdbjtag.core.setStopAt', true),
@@ -338,11 +352,151 @@ export function renderProgramLaunch(inp: LaunchConfigInput): string {
 }
 
 // ---------------------------------------------------------------------------
+// Attach launch
+// ---------------------------------------------------------------------------
+
+/**
+ * Derives the OpenOCD core name used in `monitor reset_halt <core>` commands.
+ *  - CM55 targets            → 'cm55'
+ *  - CM33 non-secure targets → 'cm33_ns'
+ *  - CM33 secure / other     → 'cm33'
+ */
+function coreNameForTarget(target: LaunchTarget): string {
+  const n = target.baseName.toLowerCase();
+  if (n.includes('cm55')) return 'cm55';
+  if (n.includes('_ns')) return 'cm33_ns';
+  return 'cm33';
+}
+
+/** Hex output path for a target (written by POST_BUILD objcopy). */
+function hexPath(inp: LaunchConfigInput, baseName: string, config = 'Debug'): string {
+  return `${projectLoc(inp)}/_build/${config}/${baseName}/${baseName}.hex`;
+}
+
+/**
+ * Builds the OpenOCD server arguments for an attach session.
+ * Differences from debug: no BSP scripts path, no QSPI_FLASHLOADER,
+ * no flash-write commands; adds `set ENABLE_ACQUIRE 0`.
+ */
+function buildOpenocdAttachServerOther(inp: LaunchConfigInput): string {
+  const proj = projectLoc(inp);
+  const certArg = inp.debugCertRelPath
+    ? `${proj}/${inp.debugCertRelPath}`
+    : `${proj}/packets/debug_token.bin`;
+
+  return [
+    `-c "set DEBUG_CERTIFICATE ${certArg}"`,
+    `-c "source [find interface/kitprog3.cfg]"`,
+    `-c "transport select swd"`,
+    `-c "set ENABLE_ACQUIRE 0"`,
+    `-c "puts stderr {Started by GNU MCU Eclipse}"`,
+    `-c "source [find ${inp.openocdTargetCfg}]"`,
+    `-c "cat1d.cm33 configure -rtos auto -rtos-wipe-on-reset-halt 1"`,
+    `-c "gdb_breakpoint_override hard"`,
+  ].join('\r\n');
+}
+
+/**
+ * Renders an OpenOCD GDB attach `.launch` file for the given target.
+ * Attaches to an already-running target without flashing.
+ */
+export function renderAttachLaunch(inp: LaunchConfigInput, primary: LaunchTarget): string {
+  const I = '    ';
+  const II = '        ';
+
+  const programPath = elfPath(inp, primary.baseName);
+  const imgPath = hexPath(inp, primary.baseName);
+  const svdArg = inp.svdRelPath ? `${projectLoc(inp)}/${inp.svdRelPath}` : '';
+  const core = coreNameForTarget(primary);
+  const runCmds = `monitor reset_halt ${core} attach\r\nflushregs\r\nmon gdb_sync\r\nthread apply all stepi`;
+
+  const memoryBlocksXml =
+    '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\r\n' +
+    '<memoryBlockExpressionList context="Context string"/>\r\n';
+
+  const lines: string[] = [
+    `<?xml version="1.0" encoding="UTF-8" standalone="no"?>`,
+    `<launchConfiguration type="ilg.gnumcueclipse.debug.gdbjtag.openocd.launchConfigurationType">`,
+    I + boolAttr('com.cypress.studio.launch.hide', true),
+    I + boolAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.doContinue', false),
+    I + boolAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.doDebugInRam', false),
+    I + boolAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.doFirstReset', false),
+    I + boolAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.doGdbServerAllocateConsole', true),
+    I + boolAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.doGdbServerAllocateTelnetConsole', false),
+    I + boolAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.doSecondReset', false),
+    I + boolAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.doStartGdbCLient', true),
+    I + boolAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.doStartGdbServer', true),
+    I + boolAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.enableSemihosting', true),
+    I + xmlAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.firstResetType', 'init'),
+    I + xmlAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.gdbClientOtherCommands',
+      'set mem inaccessible-by-default off\r\nset remotetimeout 60'),
+    I + xmlAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.gdbClientOtherOptions', ''),
+    I + xmlAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.gdbServerConnectionAddress', ''),
+    I + xmlAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.gdbServerExecutable', 'openocd'),
+    I + intAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.gdbServerGdbPortNumber', 3333),
+    I + xmlAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.gdbServerLog', ''),
+    I + xmlAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.gdbServerOther',
+      buildOpenocdAttachServerOther(inp)),
+    I + xmlAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.gdbServerTclPortNumber', '6666'),
+    I + intAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.gdbServerTelnetPortNumber', 4444),
+    I + xmlAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.otherInitCommands', ''),
+    I + xmlAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.otherRunCommands', runCmds),
+    I + xmlAttr('ilg.gnumcueclipse.debug.gdbjtag.openocd.secondResetType', 'run'),
+    ...(svdArg ? [I + xmlAttr('ilg.gnumcueclipse.debug.gdbjtag.svdPath', svdArg)] : []),
+    I + xmlAttr('org.eclipse.cdt.debug.gdbjtag.core.imageFileName', imgPath),
+    I + xmlAttr('org.eclipse.cdt.debug.gdbjtag.core.imageOffset', ''),
+    I + xmlAttr('org.eclipse.cdt.debug.gdbjtag.core.ipAddress', 'localhost'),
+    I + xmlAttr('org.eclipse.cdt.debug.gdbjtag.core.jtagDevice', 'GNU MCU OpenOCD'),
+    I + boolAttr('org.eclipse.cdt.debug.gdbjtag.core.loadImage', false),
+    I + boolAttr('org.eclipse.cdt.debug.gdbjtag.core.loadSymbols', true),
+    I + xmlAttr('org.eclipse.cdt.debug.gdbjtag.core.pcRegister', ''),
+    I + intAttr('org.eclipse.cdt.debug.gdbjtag.core.portNumber', 3333),
+    I + boolAttr('org.eclipse.cdt.debug.gdbjtag.core.setPcRegister', false),
+    I + boolAttr('org.eclipse.cdt.debug.gdbjtag.core.setResume', false),
+    I + boolAttr('org.eclipse.cdt.debug.gdbjtag.core.setStopAt', true),
+    I + xmlAttr('org.eclipse.cdt.debug.gdbjtag.core.stopAt', 'main'),
+    I + xmlAttr('org.eclipse.cdt.debug.gdbjtag.core.symbolsFileName', programPath),
+    I + xmlAttr('org.eclipse.cdt.debug.gdbjtag.core.symbolsOffset', ''),
+    I + boolAttr('org.eclipse.cdt.debug.gdbjtag.core.useFileForImage', true),
+    I + boolAttr('org.eclipse.cdt.debug.gdbjtag.core.useFileForSymbols', true),
+    I + boolAttr('org.eclipse.cdt.debug.gdbjtag.core.useProjBinaryForImage', false),
+    I + boolAttr('org.eclipse.cdt.debug.gdbjtag.core.useProjBinaryForSymbols', false),
+    I + boolAttr('org.eclipse.cdt.debug.gdbjtag.core.useRemoteTarget', true),
+    I + xmlAttr('org.eclipse.cdt.dsf.gdb.DEBUG_NAME', 'arm-none-eabi-gdb'),
+    I + boolAttr('org.eclipse.cdt.dsf.gdb.UPDATE_THREADLIST_ON_SUSPEND', false),
+    I + intAttr('org.eclipse.cdt.launch.ATTR_BUILD_BEFORE_LAUNCH_ATTR', 0),
+    I + xmlAttr('org.eclipse.cdt.launch.COREFILE_PATH', ''),
+    I + xmlAttr('org.eclipse.cdt.launch.PROGRAM_NAME', programPath),
+    I + xmlAttr('org.eclipse.cdt.launch.PROJECT_ATTR', inp.projectName),
+    I + boolAttr('org.eclipse.cdt.launch.PROJECT_BUILD_CONFIG_AUTO_ATTR', false),
+    // PROJECT_BUILD_CONFIG_ID_ATTR is intentionally absent in attach configs
+    I + boolAttr('org.eclipse.debug.core.ATTR_FORCE_SYSTEM_CONSOLE_ENCODING', false),
+    `${I}<listAttribute key="org.eclipse.debug.core.MAPPED_RESOURCE_PATHS">`,
+    `${II}<listEntry value="/${xmlEscape(inp.projectName)}"/>`,
+    `${I}</listAttribute>`,
+    `${I}<listAttribute key="org.eclipse.debug.core.MAPPED_RESOURCE_TYPES">`,
+    `${II}<listEntry value="4"/>`,
+    `${I}</listAttribute>`,
+    // favoriteGroups is intentionally absent in attach configs
+    I + xmlAttr('org.eclipse.dsf.launch.MEMORY_BLOCKS', memoryBlocksXml),
+    I + xmlAttr('process_factory_id', 'org.eclipse.cdt.dsf.gdb.GdbProcessFactory'),
+    `</launchConfiguration>`,
+    '',
+  ];
+
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // File-name helpers
 // ---------------------------------------------------------------------------
 
 export function debugLaunchFileName(projectName: string, baseName: string): string {
   return `${projectName}.${baseName} Debug (KitProg3_MiniProg4).launch`;
+}
+
+export function attachLaunchFileName(projectName: string, baseName: string): string {
+  return `${projectName}.${baseName} Attach (KitProg3_MiniProg4).launch`;
 }
 
 export function groupDebugLaunchFileName(projectName: string): string {

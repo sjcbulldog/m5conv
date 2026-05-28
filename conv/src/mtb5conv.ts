@@ -52,6 +52,7 @@ export class MTB5Converter {
     public forceDeleteDest : boolean = false ;
     public cmakeOnly : boolean = false ;
     public bspName : string | undefined ;
+    public dependsPath : string | undefined ;
     public signCombinePath : string | undefined ;
     public setOverrides : Map<string, string> = new Map() ;
     public targets : Set<string> | undefined ;
@@ -156,7 +157,7 @@ export class MTB5Converter {
         }
 
         // Load the depends database
-        const dependsPath = path.join(__dirname, '..', 'depends.json') ;
+        const dependsPath = this.dependsPath ?? '' ;
         const dependsDB = loadDependsDB(dependsPath) ;
         if (dependsDB.length > 0) {
             this.logger_.info(`Loaded depends.json with ${dependsDB.length} entries`) ;
@@ -325,7 +326,7 @@ export class MTB5Converter {
             const seenAssets = new Set<string>() ;
 
             // Load the depends database
-            const dependsPath = path.join(__dirname, '..', 'depends.json') ;
+            const dependsPath = this.dependsPath ?? '' ;
             const dependsDB = loadDependsDB(dependsPath) ;
 
             for (const req of project.assetsRequests) {

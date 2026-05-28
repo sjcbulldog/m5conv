@@ -13,6 +13,7 @@ function printUsage(): void {
     console.log("  --sign-combine <path>  Path to EPT sign-combine JSON config");
     console.log("  --set <key> <value>    Override a sign-combine symbol value (repeatable)");
     console.log("  --target <list>        Comma-separated toolchain targets to process (iar,gcc,llvm,arm; default: all)");
+    console.log("  --depends <path>       Path to depends.json file (required)");
     console.log("  --cmake-only           Regenerate cmake files only; skip all file copies (dest must already exist, cannot use with --force)");
 }
 
@@ -23,6 +24,7 @@ function main(): void {
     let source: string | undefined;
     let dest: string | undefined;
     let logfile: string | undefined;
+    let depends: string | undefined;
     let force = false;
     let cmakeOnly = false;
     let bsp: string | undefined;
@@ -51,6 +53,14 @@ function main(): void {
                 process.exit(1);
             }
             dest = args[i];
+        } else if (arg === "--depends") {
+            i++;
+            if (i >= args.length) {
+                console.error("Error: --depends requires a path argument");
+                printUsage();
+                process.exit(1);
+            }
+            depends = args[i];
         } else if (arg === "--logfile") {
             i++;
             if (i >= args.length) {
@@ -134,6 +144,12 @@ function main(): void {
         process.exit(1);
     }
 
+    if (!depends) {
+        console.error("Error: --depends is required");
+        printUsage();
+        process.exit(1);
+    }
+
     if (cmakeOnly && force) {
         console.error("Error: --cmake-only and --force cannot be used together");
         printUsage();
@@ -144,6 +160,7 @@ function main(): void {
     converter.forceDeleteDest = force;
     converter.cmakeOnly = cmakeOnly;
     converter.bspName = bsp;
+    converter.dependsPath = depends;
     converter.signCombinePath = signCombine;
     converter.setOverrides = setOverrides;
     converter.targets = targets;

@@ -11,10 +11,10 @@
             "sourceMaps": true,
             "console": "integratedTerminal",
             "args": [
-                "--cmake-only",
+                "--force",
                 "--target", "gcc",
-                "--source", "${workspaceFolder}/../projects/mtb/${input:mtbProjectName}",
-                "--dest", "${workspaceFolder}/../projects/mtb5/${input:mtbProjectName}",
+                "--source", "${workspaceFolder}/../projects/mtb/edge/${input:mtbProjectName}",
+                "--dest", "${workspaceFolder}/../projects/mtb5/edge/${input:mtbProjectName}",
             ]
         }
     ],

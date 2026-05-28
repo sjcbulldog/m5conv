@@ -2329,10 +2329,12 @@ export function generateTopLevelCMakeLists(
         const setArgs = signCombineInfo.symbols
             .map(s => `--set ${s.symbolName} \${${s.symbolName}}`)
             .join(' ') ;
+        const elfTargetFileDeps = sorted.map(p => `$<TARGET_FILE:${p}.elf>`).join(' ') ;
         lines.push('add_custom_command(') ;
         lines.push(`    OUTPUT ${outputVar}`) ;
         lines.push(`    COMMAND \${EPT} run-config -i \${CMAKE_SOURCE_DIR}/${signCombineInfo.destJsonRelPath} --symbol-search \${BSPPATH} ${setArgs}`) ;
         lines.push('    COMMENT "Combining and signing to create single output file"') ;
+        lines.push(`    DEPENDS ${elfTargetFileDeps}`) ;
         lines.push('    VERBATIM') ;
         lines.push(')') ;
         lines.push('') ;

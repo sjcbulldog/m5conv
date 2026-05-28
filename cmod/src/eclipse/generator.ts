@@ -23,9 +23,11 @@ import { renderProject } from './project.js';
 import { renderCproject, generateDebugConfigId } from './cproject.js';
 import {
   renderDebugLaunch,
+  renderAttachLaunch,
   renderGroupDebugLaunch,
   renderProgramLaunch,
   debugLaunchFileName,
+  attachLaunchFileName,
   groupDebugLaunchFileName,
   programLaunchFileName,
   type LaunchConfigInput,
@@ -262,6 +264,10 @@ export class EclipseGenerator implements IBackend {
       await write(
         `.launches/${debugLaunchFileName(projectName, target.baseName)}`,
         renderDebugLaunch(launchInput, target),
+      );
+      await write(
+        `.launches/${attachLaunchFileName(projectName, target.baseName)}`,
+        renderAttachLaunch(launchInput, target),
       );
     }
 

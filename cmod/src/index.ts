@@ -6,6 +6,7 @@ import os from "node:os";
 import { CMakeFileApiReader } from "./cmake/index.js";
 import { IarGenerator } from "./iar/index.js";
 import { EclipseGenerator } from "./eclipse/index.js";
+import { UVisionGenerator } from "./uvision/index.js";
 
 interface CliArgs {
   inputDir?: string;   // optional — not required when only --eclipse is specified
@@ -85,7 +86,7 @@ function usage(): void {
   console.error("                                  without --input: modify cmake project in-place");
   console.error("                                  with --input:    copy <cmake-source-dir> to");
   console.error("                                                   <eclipse-dir>, then add Eclipse files");
-  console.error("  --uvision <output-dir>        generate a uVision project (not yet implemented)");
+  console.error("  --uvision <output-dir>        generate a Keil µVision workspace in <output-dir>");
   console.error("  --greenhills <output-dir>     generate a Green Hills project (not yet implemented)");
   console.error("  --force, -f                   overwrite output directory if it exists");
 }
@@ -169,10 +170,16 @@ async function main(): Promise<void> {
 
   const sourceDir = args.inputDir ? path.resolve(args.inputDir) : undefined;
 
+  // Resolve toolchain files; uvision prefers keil.cmake but falls back to gcc.cmake.
+  const uvisionToolchain = sourceDir
+    ? (await exists(path.join(sourceDir, "toolchains", "keil.cmake")))
+      ? path.join(sourceDir, "toolchains", "keil.cmake")
+      : path.join(sourceDir, "toolchains", "gcc.cmake")
+    : "";
   const toolchainFiles: Record<string, string> = {
     iar: sourceDir ? path.join(sourceDir, "toolchains", "iar.cmake") : "",
     eclipse: sourceDir ? path.join(sourceDir, "toolchains", "gcc.cmake") : "",
-    uvision: sourceDir ? path.join(sourceDir, "toolchains", "gcc.cmake") : "",
+    uvision: uvisionToolchain,
     greenhills: sourceDir ? path.join(sourceDir, "toolchains", "gcc.cmake") : "",
   };
 
@@ -198,7 +205,7 @@ async function main(): Promise<void> {
     const rawDest = args[name];
     if (!rawDest) continue;
 
-    if (name === "uvision" || name === "greenhills") {
+    if (name === "greenhills") {
       console.warn(`Warning: --${name} is not yet implemented and will be skipped.`);
       continue;
     }
@@ -327,6 +334,13 @@ async function main(): Promise<void> {
         const files = await generator.generate();
         console.log(`[eclipse] Done. Wrote ${files.length} Eclipse project file(s):`);
         for (const f of files) console.log(`[eclipse]   - ${f}`);
+      } else if (backend.name === "uvision") {
+        console.log(`[uvision] Generating Keil µVision workspace in ${backend.destDir} ...`);
+        const generator = new UVisionGenerator(model, { sourceDir: sourceDir!, destDir: backend.destDir });
+        const result = await generator.generate();
+        console.log(`[uvision] Done. Wrote workspace: ${path.resolve(result.workspaceFile)}`);
+        console.log(`[uvision]   Projects (${result.projects.length}):`);
+        for (const p of result.projects) console.log(`[uvision]     - ${p}`);
       }
     }
   } finally {
