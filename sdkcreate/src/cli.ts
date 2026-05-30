@@ -9,6 +9,8 @@ export interface CliArgs {
     depends: string;
     limit?: number;
     include?: string[];
+    skip?: number[];
+    targets?: string[];
 }
 
 function printUsage(): void {
@@ -28,6 +30,10 @@ Optional options:
   --limit=INTEGER             Limit the number of code examples per BSP (for testing)
   --include=NAME              Always include this code example when using --limit;
                               may be specified multiple times
+  --skip=N,M,...              Comma-separated phase numbers (1, 2, 3) to skip if
+                              the phase output directory already exists
+  --target=T1,T2,...          Comma-separated toolchain targets passed to mtb2cmake
+                              (iar, gcc, llvm, arm; default: all)
 
   --help                      Show this help message
 `);
@@ -71,6 +77,34 @@ export function parseArgs(argv: string[]): CliArgs {
                 result.include = [];
             }
             result.include.push(name);
+        } else if (arg.startsWith('--skip=')) {
+            const parts = arg.slice('--skip='.length).split(',').map(s => s.trim()).filter(s => s.length > 0);
+            const phases: number[] = [];
+            for (const part of parts) {
+                const n = parseInt(part, 10);
+                if (isNaN(n) || n < 1 || n > 3) {
+                    console.error(`Error: --skip values must be phase numbers 1, 2, or 3 (got: ${part})`);
+                    printUsage();
+                    process.exit(1);
+                }
+                phases.push(n);
+            }
+            result.skip = phases;
+        } else if (arg.startsWith('--target=')) {
+            const validTargets = new Set(['iar', 'gcc', 'llvm', 'arm']);
+            const words = arg.slice('--target='.length).split(',').map(s => s.trim().toLowerCase()).filter(s => s.length > 0);
+            if (words.length === 0) {
+                console.error(`Error: --target list must not be empty`);
+                printUsage();
+                process.exit(1);
+            }
+            const invalid = words.filter(w => !validTargets.has(w));
+            if (invalid.length > 0) {
+                console.error(`Error: invalid target(s): ${invalid.join(', ')}. Valid targets are: iar, gcc, llvm, arm`);
+                printUsage();
+                process.exit(1);
+            }
+            result.targets = words;
         } else {
             console.error(`Unknown argument: ${arg}`);
             printUsage();

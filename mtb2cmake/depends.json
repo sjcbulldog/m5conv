@@ -1,3 +1,46 @@
+// depends.json — ModusToolbox asset dependency database for mtb2cmake
+//
+// This file describes the include-directory export/import relationships between
+// ModusToolbox middleware and BSP assets so that the converter can wire up
+// CMake target_include_directories() calls without needing to run the
+// ModusToolbox build system.
+//
+// Format: JSON array of asset entries.  Comments (// and /* */) are allowed.
+//
+// Each entry has the following fields:
+//
+//   "name"     (string, required)
+//              The asset's library name, matching the directory name under
+//              the libs/ or shared/libs/ tree (e.g. "core-lib", "freertos").
+//
+//   "exports"  (string[], required)
+//              Subdirectory paths (relative to the asset root) that are added
+//              to the PUBLIC include path for any target that imports this asset.
+//
+//   "imports"  (array, optional)
+//              Other assets whose exported include directories this asset needs.
+//              Each element is either:
+//                - a plain string  — the name of another asset in this file, or
+//                  one of the special tokens:
+//                    "***BSP***"                  the board support package root
+//                    "***BSP***/config/GeneratedSource"  BSP generated headers
+//                    "***PROJECT***"              the application project root
+//                - an object { "component": "<COMPONENT_FLAG>", "name": "<asset>" }
+//                  which makes the import conditional on that COMPONENT_* define.
+//
+//   "includes" (string[], optional)
+//              Extra subdirectory paths added to the PRIVATE include path of
+//              this asset only (not propagated to importers).
+//
+//   "internal" (string[], optional)
+//              Source subdirectories that contain toolchain-specific source
+//              files (e.g. "source/TOOLCHAIN_GCC_ARM").  The converter adds
+//              these to the asset's source glob list.
+//
+//   "excludes" (string[], optional)
+//              Subdirectory or file paths to exclude from source globbing
+//              (e.g. test harnesses, documentation generator sources).
+//
 [
     {
         "name" : "async-transfer",
@@ -65,6 +108,7 @@
             "pdl/drivers/third_party/COMPONENT_GFXSS/vsi/gcnano/inc/",                        
             "pdl/devices/include",
             "pdl/devices/include/ip",
+            "device-utils/syspm/include",
             "hal/include"
         ],
         "imports" : [
@@ -80,7 +124,6 @@
             "***PROJECT***"
         ],
         "includes" : [
-            "device-utils/syspm/include",
             "pdl/drivers/third_party/ethernet/include",
             "nnkernel/COMPONENT_CM33/include",
             "pdl/drivers/third_party/COMPONENT_GFXSS/vsi/dcnano8000/DCUser/rtos",
@@ -109,8 +152,10 @@
                 "component" : "FREERTOS",
                 "name" : "freertos"
             },
+            "btstack-integration",
             "***BSP***",                
             "***BSP***/config/GeneratedSource",
+            "***BSP***/bluetooth",
             "***PROJECT***"
         ],
         "includes" : [
@@ -134,6 +179,9 @@
             "Source/portable/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/COMPONENT_FREERTOS_NTZ",
             "Source/portable/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/COMPONENT_FREERTOS_TZ",
             "Source/portable/COMPONENT_CM55/TOOLCHAIN_GCC_ARM",
+            "Source/portable/COMPONENT_CM33/TOOLCHAIN_LLVM_ARM/COMPONENT_FREERTOS_NTZ",
+            "Source/portable/COMPONENT_CM33/TOOLCHAIN_LLVM_ARM/COMPONENT_FREERTOS_TZ",
+            "Source/portable/COMPONENT_CM55/TOOLCHAIN_LLVM_ARM",            
             "Source/portable/COMPONENT_CM0/TOOLCHAIN_IAR",
             "Source/portable/COMPONENT_CM4/TOOLCHAIN_IAR",
             "Source/portable/COMPONENT_CM7/TOOLCHAIN_IAR",
@@ -712,6 +760,121 @@
         ],
         "internal" : [
             "libraries/aws/ota-for-aws-iot-embedded-sdk/source/include"
+        ]
+    },
+    {
+        "name" : "avnet-iotc-mtb-sdk",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "connectivity-utilities",
+            "lwip",
+            "lwip-freertos-integration",
+            "lwip-network-interface-integration",
+            "wifi-core-freertos-lwip-mbedtls",
+            "wifi-host-driver",
+            "whd-bsp-integration",
+            "ifx-mbedtls",
+            "cy-mbedtls-acceleration",
+            "abstraction-rtos",
+            "freertos",
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "mtb-ipc",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ],
+        "internal" : [
+            "lib/iotc-c-lib/lib/cJSON",
+            "lib/iotc-c-lib/core/include"
+        ]
+    },
+    {
+        "name" : "btstack-integration",
+        "exports" : [
+            "include",
+            "COMPONENT_BLESS-IPC/include",
+            "COMPONENT_BTSS-IPC/include",
+            "COMPONENT_HCI-UART/include",
+            "COMPONENT_HCI-UART/common"
+        ],
+        "imports" : [
+            "btstack",
+            "abstraction-rtos",
+            "freertos",            
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "async-transfer",
+            "mtb-dsl-pse8xxgp",
+            "***BSP***",
+            "***BSP***/bluetooth",
+            "***BSP***/config/GeneratedSource"
+        ],
+        "internal" : [
+            "COMPONENT_BLESS-IPC/platform_hal_wrappers",
+            "COMPONENT_BTSS-IPC/platform_hal_wrappers",
+            "COMPONENT_HCI-UART/platform_hal_wrappers",
+            "COMPONENT_HCI-UART/common"
+        ]
+    },
+    {
+        "name" : "btstack",
+        "exports" : [
+            "wiced_include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "kv-store",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "block-storage",
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "block-storage",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
         ]
     }
 ]

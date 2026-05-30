@@ -1,5 +1,5 @@
 import { ModusToolboxEnvironment, MTBLoadFlags } from "./mtbenv";
-import { collectSources, collectHeaders, generateObjectLibraryCMakeLists, generateHeaderOnlyCMakeLists, generateProjectCMakeLists, generateTopLevelCMakeLists, generateAppInfoCMake, generateProjInfoCMake, generateGccToolchainCMake, generateIarToolchainCMake, generateLlvmToolchainCMake, generateArmToolchainCMake, generateBspCMakeInclude, AssetSubdirectory, loadDependsDB, resolveIncludeDirs, resolveAssetExports, resolveAssetInternals, hasActiveSources, readProjectDefinesByConfig, readProjectDefinesForConfig, fixDefineFilePaths, readProjectFlagsByConfig, readProjectFlagsForConfig, mergeProjectFlagsByConfig, ProjectFlagsByConfig, ProjectFlagsByToolchain, DependsEntry, ConditionalIncludeDir, processSignCombineJson, SignCombineInfo } from './cmakeutil';
+import { collectSources, collectHeaders, collectLibraries, collectProjectHeaderDirs, generateObjectLibraryCMakeLists, generateHeaderOnlyCMakeLists, generateLibraryAssetCMakeLists, generateProjectCMakeLists, generateTopLevelCMakeLists, generateAppInfoCMake, generateProjInfoCMake, generateGccToolchainCMake, generateIarToolchainCMake, generateLlvmToolchainCMake, generateArmToolchainCMake, generateBspCMakeInclude, generateCMakePresetsFile, generateVSCodeLaunchJson, generateVSCodeTasksJson, generateVSCodeSettingsJson, AssetSubdirectory, loadDependsDB, resolveIncludeDirs, resolveAssetExports, resolveAssetInternals, hasActiveSources, readProjectDefinesByConfig, readProjectDefinesForConfig, fixDefineFilePaths, readProjectFlagsByConfig, readProjectFlagsForConfig, mergeProjectFlagsByConfig, ProjectFlagsByConfig, ProjectFlagsByToolchain, DependsEntry, ConditionalIncludeDir, processSignCombineJson, SignCombineInfo } from './cmakeutil';
 import { MTBUtils } from './mtbenv/misc/mtbutils';
 import * as winston from 'winston';
 import * as fs from 'fs';
@@ -136,6 +136,12 @@ export class MTB5Converter {
                     this.logger_.info(`Copying BSP directory: ${entry.name}`) ;
                     const bspSkipped = await copyDirTolerant(srcTarget, destTarget) ;
                     warnSkippedFiles(this.logger_, `BSP '${entry.name}'`, bspSkipped) ;
+
+                    const bspMk = path.join(destTarget, 'bsp.mk') ;
+                    if (fs.existsSync(bspMk)) {
+                        this.logger_.info(`Removing bsp.mk from BSP '${entry.name}'`) ;
+                        fs.unlinkSync(bspMk) ;
+                    }
                 } else if (!fs.existsSync(destTarget)) {
                     this.logger_.warn(`BSP directory '${entry.name}' not found in destination - skipping`) ;
                     continue ;
@@ -159,10 +165,12 @@ export class MTB5Converter {
         // Load the depends database
         const dependsPath = this.dependsPath ?? '' ;
         const dependsDB = loadDependsDB(dependsPath) ;
-        if (dependsDB.length > 0) {
-            this.logger_.info(`Loaded depends.json with ${dependsDB.length} entries`) ;
-        } else {
-            this.logger_.warn('No depends.json found or it is empty - no include directories will be resolved') ;
+        if (dependsDB.length === 0) {
+            throw new Error(`No assets found in depends file '${dependsPath}'`) ;
+        }
+        this.logger_.info(`Found ${dependsDB.length} asset(s) in depends file:`) ;
+        for (const entry of dependsDB) {
+            this.logger_.info(`  ${entry.name}`) ;
         }
 
         const destAssetsDir = path.join(this.dest_, 'assets') ;
@@ -230,19 +238,23 @@ export class MTB5Converter {
                     }
                 }
                 const sources = collectSources(destPath, destPath, [], assetIgnorePaths) ;
+                const libraries = collectLibraries(destPath, destPath, [], assetIgnorePaths) ;
                 const bspDir = project.bspName ? '${BSP_DIR}' : undefined ;
                 const includeDirs = resolveIncludeDirs(assetName, dependsDB, '..', bspDir) ;
                 const internalDirs = resolveAssetInternals(assetName, dependsDB) ;
                 if (sources.length > 0) {
-                    generateObjectLibraryCMakeLists(destPath, assetName, sources, includeDirs, internalDirs) ;
+                    generateObjectLibraryCMakeLists(destPath, assetName, sources, includeDirs, internalDirs, libraries) ;
                     this.logger_.info(`Generated CMakeLists.txt for asset '${assetName}'`) ;
-                } else {
-                    // No source files - check for headers
-                    const headers = collectHeaders(destPath, destPath, [], assetIgnorePaths) ;
-                    if (headers.length > 0) {
-                        generateHeaderOnlyCMakeLists(destPath, assetName, headers, includeDirs) ;
-                        this.logger_.info(`Generated header-only CMakeLists.txt for asset '${assetName}'`) ;
+                    if (libraries.length > 0) {
+                        this.logger_.info(`  Asset '${assetName}' includes ${libraries.length} prebuilt librar${libraries.length === 1 ? 'y' : 'ies'}`) ;
                     }
+                } else if (libraries.length > 0) {
+                    generateLibraryAssetCMakeLists(destPath, assetName, libraries, includeDirs) ;
+                    this.logger_.info(`Generated library-only CMakeLists.txt for asset '${assetName}' (${libraries.length} prebuilt librar${libraries.length === 1 ? 'y' : 'ies'})`) ;
+                } else {
+                    // No source or library files - generate a header-only INTERFACE target
+                    generateHeaderOnlyCMakeLists(destPath, assetName, includeDirs) ;
+                    this.logger_.info(`Generated header-only CMakeLists.txt for asset '${assetName}'`) ;
                 }
 
                 copiedAssets.add(assetName) ;
@@ -292,6 +304,9 @@ export class MTB5Converter {
             return ;
         }
 
+        const dependsPath = this.dependsPath ?? '' ;
+        const dependsDB = loadDependsDB(dependsPath) ;
+
         for (const project of appInfo.projects) {
             const projName = project.name ;
             const srcProjDir = project.path ;
@@ -316,18 +331,17 @@ export class MTB5Converter {
             const assetSubs: AssetSubdirectory[] = [] ;
             const projectIncludeDirs: ConditionalIncludeDir[] = [] ;
 
-            // If the project has an 'include' subdirectory, add it to the include path.
-            if (fs.existsSync(path.join(srcProjDir, 'include'))) {
-                projectIncludeDirs.push({ path: '${CMAKE_CURRENT_SOURCE_DIR}/include', conditions: [] }) ;
-                this.logger_.info(`  Adding project include directory: include`) ;
+            // Recursively find all directories under the project root that contain
+            // header files (*.h) and add each unique directory to the include path.
+            const headerDirs = collectProjectHeaderDirs(destProjDir, destProjDir) ;
+            for (const d of headerDirs) {
+                projectIncludeDirs.push(d) ;
+                const relLabel = d.path.replace('${CMAKE_CURRENT_SOURCE_DIR}/', '').replace('${CMAKE_CURRENT_SOURCE_DIR}', '.') ;
+                this.logger_.info(`  Adding project include directory: ${relLabel}`) ;
             }
 
             const dirList = project.dirList ;
             const seenAssets = new Set<string>() ;
-
-            // Load the depends database
-            const dependsPath = this.dependsPath ?? '' ;
-            const dependsDB = loadDependsDB(dependsPath) ;
 
             for (const req of project.assetsRequests) {
                 if (req.isBSP()) {
@@ -356,14 +370,15 @@ export class MTB5Converter {
                         }
                     }
 
-                    // Only include assets that have source files active for this project's components.
+                    // Only include assets that have source or library files active for this project's components.
                     // Apply the same ignore paths used during CMakeLists generation so that assets
                     // with all sources ignored (e.g. entire directory ignored) are not included.
                     // Also guard against assets where no CMakeLists.txt was generated at all
                     // (e.g. another project's ignore rules suppressed the whole directory).
                     const assetCMakeLists = path.join(destAssetPath, 'CMakeLists.txt') ;
                     const assetSources = collectSources(destAssetPath, destAssetPath, [], assetIgnorePaths) ;
-                    if (fs.existsSync(assetCMakeLists) && hasActiveSources(assetSources, project.components)) {
+                    const assetLibraries = collectLibraries(destAssetPath, destAssetPath, [], assetIgnorePaths) ;
+                    if (fs.existsSync(assetCMakeLists) && (hasActiveSources(assetSources, project.components) || hasActiveSources(assetLibraries, project.components))) {
                         const relativePath = path.relative(destProjDir, destAssetPath).replace(/\\/g, '/') ;
                         assetSubs.push({
                             name: assetName,
@@ -705,5 +720,28 @@ export class MTB5Converter {
             generateArmToolchainCMake(this.dest_) ;
             this.logger_.info('Generated toolchains/arm.cmake') ;
         }
+
+        generateCMakePresetsFile(this.dest_) ;
+        this.logger_.info('Generated CMakePresets.json') ;
+
+        // Resolve BSP name for launch.json search dirs (best-effort; skipped if
+        // the bsps/ directory is absent or contains multiple BSPs without --bsp).
+        let bspNameForLaunch: string | undefined = bspNameResolved ;
+        if (!bspNameForLaunch) {
+            try {
+                bspNameForLaunch = this.resolveBspName() ;
+            } catch {
+                // No BSP available yet — launch.json will omit the BSP search dir
+            }
+        }
+
+        generateVSCodeLaunchJson(this.dest_, projectNames, bspNameForLaunch) ;
+        this.logger_.info('Generated .vscode/launch.json') ;
+
+        generateVSCodeTasksJson(this.dest_) ;
+        this.logger_.info('Generated .vscode/tasks.json') ;
+
+        generateVSCodeSettingsJson(this.dest_) ;
+        this.logger_.info('Generated .vscode/settings.json') ;
     }
 }

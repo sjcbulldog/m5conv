@@ -9,6 +9,7 @@ export interface Phase3Options {
     cmakedir: string;
     logDir: string;
     status: StatusTracker;
+    skip?: Set<number>;
 }
 
 export async function runPhase3(opts: Phase3Options): Promise<void> {
@@ -20,6 +21,15 @@ export async function runPhase3(opts: Phase3Options): Promise<void> {
     for (const { bsp, app } of opts.pairs) {
         const projDir  = path.join(opts.cmakedir, bsp, app);
         const buildDir = path.join(projDir, 'build');
+
+        if (opts.skip?.has(3) && fs.existsSync(buildDir)) {
+            done++;
+            const pct = Math.round((done / total) * 100);
+            opts.status.updateEntry(bsp, app, { cmake_status: 'skipped', ninja_status: 'skipped' });
+            console.log(`    Skipping phase 3 for ${app}/${bsp} (build directory exists) (${pct}% of total)`);
+            continue;
+        }
+
         fs.mkdirSync(buildDir, { recursive: true });
 
         // log file paths
@@ -60,7 +70,7 @@ export async function runPhase3(opts: Phase3Options): Promise<void> {
 
     const successes = opts.pairs.filter(p => {
         const e = opts.status.getEntry(p.bsp, p.app);
-        return e?.ninja_status === 'success';
+        return e?.ninja_status === 'success' || e?.ninja_status === 'skipped';
     }).length;
     console.log(`\nPhase 3 complete: ${successes}/${total} ninja builds successful`);
 }

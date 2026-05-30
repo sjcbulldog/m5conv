@@ -978,6 +978,11 @@ const sourceExtensions = new Set(['.c', '.s']) ;
 const headerExtensions = new Set(['.h']) ;
 
 //
+// The file extensions treated as prebuilt library files.
+//
+const libraryExtensions = new Set(['.a']) ;
+
+//
 // Recursively collect all source files (*.c, *.s) under a directory,
 // tracking which COMPONENT_*, TARGET_*, CONFIG_*, and TOOLCHAIN_*
 // directories each file is nested under.  Conditions accumulate as
@@ -1077,6 +1082,105 @@ export function collectHeaders(
         }
     }
 
+    return results ;
+}
+
+//
+// Recursively collect all prebuilt library files (*.a) under a directory,
+// tracking which COMPONENT_*, TARGET_*, CONFIG_*, and TOOLCHAIN_*
+// directories each file is nested under.  Conditions accumulate the same
+// way as for collectSources.
+//
+export function collectLibraries(
+    dir: string,
+    baseDir: string,
+    conditions: DirCondition[] = [],
+    ignorePaths: string[] = []
+) : ConditionalSource[] {
+    const results: ConditionalSource[] = [] ;
+    const entries = fs.readdirSync(dir, { withFileTypes: true }) ;
+
+    for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name) ;
+        const normFull = path.normalize(fullPath) ;
+
+        if (ignorePaths.some(ip => normFull.startsWith(path.normalize(ip)))) {
+            continue ;
+        }
+
+        if (entry.isFile()) {
+            const ext = path.extname(entry.name).toLowerCase() ;
+            if (libraryExtensions.has(ext)) {
+                const relPath = path.relative(baseDir, fullPath).replace(/\\/g, '/') ;
+                results.push({ relPath, conditions: [...conditions] }) ;
+            }
+        } else if (entry.isDirectory()) {
+            let newConditions = [...conditions] ;
+
+            for (const sp of specialPrefixes) {
+                if (entry.name.startsWith(sp.prefix)) {
+                    newConditions.push({
+                        type: sp.type,
+                        dirName: entry.name,
+                        value: entry.name.substring(sp.prefix.length)
+                    }) ;
+                    break ;
+                }
+            }
+
+            results.push(...collectLibraries(fullPath, baseDir, newConditions, ignorePaths)) ;
+        }
+    }
+
+    return results ;
+}
+
+//
+// Recursively collect all unique directories under a project root that
+// contain at least one header file (*.h).  Returns ConditionalIncludeDir
+// entries with CMake paths of the form ${CMAKE_CURRENT_SOURCE_DIR}/<relpath>
+// (or just ${CMAKE_CURRENT_SOURCE_DIR} for the root itself) and conditions
+// derived from any COMPONENT_*, TARGET_*, CONFIG_*, or TOOLCHAIN_* segments
+// in the relative path.  ignorePaths works the same as in collectSources.
+//
+export function collectProjectHeaderDirs(
+    dir: string,
+    baseDir: string,
+    ignorePaths: string[] = []
+) : ConditionalIncludeDir[] {
+    const results: ConditionalIncludeDir[] = [] ;
+
+    function walk(currentDir: string) : void {
+        const entries = fs.readdirSync(currentDir, { withFileTypes: true }) ;
+        let hasHeader = false ;
+
+        for (const entry of entries) {
+            const fullPath = path.join(currentDir, entry.name) ;
+            const normFull = path.normalize(fullPath) ;
+
+            if (ignorePaths.some(ip => normFull.startsWith(path.normalize(ip)))) {
+                continue ;
+            }
+
+            if (entry.isFile()) {
+                if (headerExtensions.has(path.extname(entry.name).toLowerCase())) {
+                    hasHeader = true ;
+                }
+            } else if (entry.isDirectory()) {
+                walk(fullPath) ;
+            }
+        }
+
+        if (hasHeader) {
+            const relPath = path.relative(baseDir, currentDir).replace(/\\/g, '/') ;
+            const cmakePath = relPath === ''
+                ? '${CMAKE_CURRENT_SOURCE_DIR}'
+                : `\${CMAKE_CURRENT_SOURCE_DIR}/${relPath}` ;
+            results.push({ path: cmakePath, conditions: extractPathConditions(relPath) }) ;
+        }
+    }
+
+    walk(dir) ;
     return results ;
 }
 
@@ -1181,7 +1285,8 @@ export function generateObjectLibraryCMakeLists(
     libraryName: string,
     sources: ConditionalSource[],
     includeDirs: ConditionalIncludeDir[] = [],
-    internalDirs: ConditionalIncludeDir[] = []
+    internalDirs: ConditionalIncludeDir[] = [],
+    libraries: ConditionalSource[] = []
 ) : void {
     const { unconditional, conditionalGroups } = groupSources(sources) ;
 
@@ -1305,6 +1410,35 @@ export function generateObjectLibraryCMakeLists(
         }
     }
 
+    // Prebuilt library files (.a) — linked PUBLIC so they are transitively
+    // available to every target that consumes this OBJECT library.
+    if (libraries.length > 0) {
+        const { unconditional: unconditionalLibs, conditionalGroups: conditionalLibGroups } = groupSources(libraries) ;
+
+        if (unconditionalLibs.length > 0) {
+            lines.push('') ;
+            lines.push('target_link_libraries(${MTB5_ASSET_TARGET} PUBLIC') ;
+            for (const lib of unconditionalLibs) {
+                lines.push(`    \${CMAKE_CURRENT_SOURCE_DIR}/${lib}`) ;
+            }
+            lines.push(')') ;
+        }
+
+        const sortedLibKeys = [...conditionalLibGroups.keys()].sort() ;
+        for (const key of sortedLibKeys) {
+            const group = conditionalLibGroups.get(key)! ;
+            group.files.sort() ;
+            lines.push('') ;
+            lines.push(`if(${conditionToCMake(group.conditions)})`) ;
+            lines.push('    target_link_libraries(${MTB5_ASSET_TARGET} PUBLIC') ;
+            for (const lib of group.files) {
+                lines.push(`        \${CMAKE_CURRENT_SOURCE_DIR}/${lib}`) ;
+            }
+            lines.push('    )') ;
+            lines.push('endif()') ;
+        }
+    }
+
     lines.push('') ;
 
     const cmakePath = path.join(targetDir, 'CMakeLists.txt') ;
@@ -1416,68 +1550,64 @@ export function generateBspCMakeInclude(
 }
 
 //
-// Generate a CMakeLists.txt that copies header files to the build
-// directory so they are available to other build targets.  Uses the
-// same conditional inclusion rules for COMPONENT_*, TARGET_*,
-// CONFIG_*, and TOOLCHAIN_* directories.
+// Generate a CMakeLists.txt for an asset that ships prebuilt static libraries
+// (*.a) but no compilable source files.  The target is an INTERFACE library so
+// that its link requirements and include directories are automatically
+// propagated to every executable that consumes it via target_link_libraries.
 //
-export function generateHeaderOnlyCMakeLists(
+export function generateLibraryAssetCMakeLists(
     targetDir: string,
     libraryName: string,
-    headers: ConditionalSource[],
+    libraries: ConditionalSource[],
     includeDirs: ConditionalIncludeDir[] = []
 ) : void {
-    const { unconditional, conditionalGroups } = groupSources(headers) ;
+    const { unconditional, conditionalGroups } = groupSources(libraries) ;
 
     const lines: string[] = [] ;
     lines.push('cmake_minimum_required(VERSION 3.16)') ;
     lines.push(`project(${libraryName})`) ;
     lines.push('') ;
-    lines.push(`set(HEADER_DEST \${CMAKE_BINARY_DIR}/include/\${PROJECT_NAME})`) ;
+    lines.push(`if(DEFINED MTB5_ASSET_LIBRARY_NAME)`) ;
+    lines.push(`    set(MTB5_ASSET_TARGET \${MTB5_ASSET_LIBRARY_NAME})`) ;
+    lines.push('else()') ;
+    lines.push(`    set(MTB5_ASSET_TARGET ${libraryName})`) ;
+    lines.push('endif()') ;
     lines.push('') ;
+    lines.push('add_library(${MTB5_ASSET_TARGET} INTERFACE)') ;
 
-    // Unconditional headers
-    lines.push('set(HEADERS') ;
-    for (const f of unconditional) {
-        lines.push(`    ${f}`) ;
+    // Unconditional library files
+    if (unconditional.length > 0) {
+        lines.push('') ;
+        lines.push('target_link_libraries(${MTB5_ASSET_TARGET} INTERFACE') ;
+        for (const lib of unconditional) {
+            lines.push(`    \${CMAKE_CURRENT_SOURCE_DIR}/${lib}`) ;
+        }
+        lines.push(')') ;
     }
-    lines.push(')') ;
 
-    // Conditional header groups
-    const sortedKeys = [...conditionalGroups.keys()].sort() ;
-    for (const key of sortedKeys) {
+    // Conditional library file groups
+    const sortedLibKeys = [...conditionalGroups.keys()].sort() ;
+    for (const key of sortedLibKeys) {
         const group = conditionalGroups.get(key)! ;
         group.files.sort() ;
-
         lines.push('') ;
         lines.push(`if(${conditionToCMake(group.conditions)})`) ;
-        lines.push('    list(APPEND HEADERS') ;
-        for (const f of group.files) {
-            lines.push(`        ${f}`) ;
+        lines.push('    target_link_libraries(${MTB5_ASSET_TARGET} INTERFACE') ;
+        for (const lib of group.files) {
+            lines.push(`        \${CMAKE_CURRENT_SOURCE_DIR}/${lib}`) ;
         }
         lines.push('    )') ;
         lines.push('endif()') ;
     }
 
-    lines.push('') ;
-    lines.push(`add_custom_target(\${PROJECT_NAME}_headers ALL)`) ;
-    lines.push('') ;
-    lines.push('foreach(HDR ${HEADERS})') ;
-    lines.push('    get_filename_component(HDR_DIR ${HDR} DIRECTORY)') ;
-    lines.push('    add_custom_command(TARGET ${PROJECT_NAME}_headers POST_BUILD') ;
-    lines.push('        COMMAND ${CMAKE_COMMAND} -E make_directory ${HEADER_DEST}/${HDR_DIR}') ;
-    lines.push('        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/${HDR} ${HEADER_DEST}/${HDR_DIR}/') ;
-    lines.push('    )') ;
-    lines.push('endforeach()') ;
-
-    // Add include directories from dependencies
+    // Include directories (INTERFACE so they propagate to consumers)
     if (includeDirs.length > 0) {
         const unconditionalIncs = includeDirs.filter(d => d.conditions.length === 0) ;
-        const conditionalIncs = includeDirs.filter(d => d.conditions.length > 0) ;
+        const conditionalIncs   = includeDirs.filter(d => d.conditions.length > 0) ;
 
         if (unconditionalIncs.length > 0) {
             lines.push('') ;
-            lines.push(`target_include_directories(\${PROJECT_NAME}_headers PUBLIC`) ;
+            lines.push('target_include_directories(${MTB5_ASSET_TARGET} INTERFACE') ;
             for (const d of unconditionalIncs) {
                 lines.push(`    ${d.path}`) ;
             }
@@ -1498,7 +1628,73 @@ export function generateHeaderOnlyCMakeLists(
             const group = incGroups.get(key)! ;
             lines.push('') ;
             lines.push(`if(${conditionToCMake(group.conditions)})`) ;
-            lines.push(`    target_include_directories(\${PROJECT_NAME}_headers PUBLIC`) ;
+            lines.push('    target_include_directories(${MTB5_ASSET_TARGET} INTERFACE') ;
+            for (const d of group.dirs) {
+                lines.push(`        ${d}`) ;
+            }
+            lines.push('    )') ;
+            lines.push('endif()') ;
+        }
+    }
+
+    lines.push('') ;
+
+    const cmakePath = path.join(targetDir, 'CMakeLists.txt') ;
+    fs.writeFileSync(cmakePath, lines.join('\n')) ;
+}
+
+//
+// Generate a CMakeLists.txt that copies header files to the build
+//
+// Generate a CMakeLists.txt for a header-only asset.  Uses an INTERFACE
+// library so that include directories are propagated to consumers via
+// target_link_libraries — no files are copied.
+//
+export function generateHeaderOnlyCMakeLists(
+    targetDir: string,
+    libraryName: string,
+    includeDirs: ConditionalIncludeDir[] = []
+) : void {
+    const lines: string[] = [] ;
+    lines.push('cmake_minimum_required(VERSION 3.16)') ;
+    lines.push(`project(${libraryName})`) ;
+    lines.push('') ;
+    lines.push(`if(DEFINED MTB5_ASSET_LIBRARY_NAME)`) ;
+    lines.push(`    set(MTB5_ASSET_TARGET \${MTB5_ASSET_LIBRARY_NAME})`) ;
+    lines.push('else()') ;
+    lines.push(`    set(MTB5_ASSET_TARGET ${libraryName})`) ;
+    lines.push('endif()') ;
+    lines.push('') ;
+    lines.push('add_library(${MTB5_ASSET_TARGET} INTERFACE)') ;
+
+    if (includeDirs.length > 0) {
+        const unconditionalIncs = includeDirs.filter(d => d.conditions.length === 0) ;
+        const conditionalIncs   = includeDirs.filter(d => d.conditions.length > 0) ;
+
+        if (unconditionalIncs.length > 0) {
+            lines.push('') ;
+            lines.push('target_include_directories(${MTB5_ASSET_TARGET} INTERFACE') ;
+            for (const d of unconditionalIncs) {
+                lines.push(`    ${d.path}`) ;
+            }
+            lines.push(')') ;
+        }
+
+        const incGroups = new Map<string, { conditions: DirCondition[], dirs: string[] }>() ;
+        for (const d of conditionalIncs) {
+            const key = conditionKey(d.conditions) ;
+            if (!incGroups.has(key)) {
+                incGroups.set(key, { conditions: d.conditions, dirs: [] }) ;
+            }
+            incGroups.get(key)!.dirs.push(d.path) ;
+        }
+
+        const sortedIncKeys = [...incGroups.keys()].sort() ;
+        for (const key of sortedIncKeys) {
+            const group = incGroups.get(key)! ;
+            lines.push('') ;
+            lines.push(`if(${conditionToCMake(group.conditions)})`) ;
+            lines.push('    target_include_directories(${MTB5_ASSET_TARGET} INTERFACE') ;
             for (const d of group.dirs) {
                 lines.push(`        ${d}`) ;
             }
@@ -1818,8 +2014,8 @@ export function generateProjectCMakeLists(
     // start-up libraries are included automatically.
     lines.push('set_target_properties(${APPNAME} PROPERTIES LINKER_LANGUAGE CXX)') ;
 
-    // GCC_ARM entry drives GCC-specific constructs: link search dirs, CMSE veneer,
-    // and additional link inputs (.ldlibs).  These are inherently GCC linker concepts.
+    // GCC_ARM entry drives GCC-specific constructs: link search dirs and
+    // additional link inputs (.ldlibs).  These are inherently GCC linker concepts.
     const gccFlags = flagsByToolchain?.['GCC_ARM'] ;
 
     // Link search directories extracted from -L / -Xlinker -L flags in .ldflags.
@@ -1840,14 +2036,25 @@ export function generateProjectCMakeLists(
     // the canonical veneer in the source tree keeps its path stable across
     // clean rebuilds, so the non-secure project can reference it with a fixed
     // relative path via .ldlibs.
-    if (gccFlags?.link.hasCmse) {
+    //
+    // Collect every toolchain whose .ldflags contained CMSE veneer flags
+    // (-Wl,--cmse-implib / -Wl,--out-implib).  Both GCC_ARM and LLVM_ARM use
+    // these GNU-compatible linker flags, so the same target_link_options syntax
+    // applies to both.
+    const cmseToolchains = Object.keys(flagsByToolchain ?? {})
+        .filter(tc => flagsByToolchain![tc].link.hasCmse)
+        .sort() ;
+
+    if (cmseToolchains.length > 0) {
         lines.push('') ;
         lines.push('set(NSC_VENEER_TMP  ${CMAKE_CURRENT_BINARY_DIR}/nsc_veneer.o.tmp)') ;
         lines.push('set(NSC_VENEER_PATH ${CMAKE_CURRENT_SOURCE_DIR}/nsc_veneer.o)') ;
         lines.push('') ;
-        // CMSE veneer link flags (-Wl,--cmse-implib / -Wl,--out-implib) use
-        // GCC linker syntax; only emit them for the GCC toolchain.
-        lines.push('if(MTBTOOLCHAIN STREQUAL "GCC_ARM")') ;
+        // Emit veneer link flags for every toolchain that had them in .ldflags.
+        const cmseCondition = cmseToolchains
+            .map(tc => `MTBTOOLCHAIN STREQUAL "${tc}"`)
+            .join(' OR ') ;
+        lines.push(`if(${cmseCondition})`) ;
         lines.push('    target_link_options(${APPNAME} PRIVATE') ;
         lines.push('        -Wl,--cmse-implib') ;
         lines.push('        -Wl,--out-implib=${NSC_VENEER_TMP}') ;
@@ -2524,4 +2731,455 @@ export function generateArmToolchainCMake(destDir: string) : void {
     fs.mkdirSync(toolchainsDir, { recursive: true }) ;
     const cmakePath = path.join(toolchainsDir, 'arm.cmake') ;
     fs.writeFileSync(cmakePath, lines.join('\n')) ;
+}
+
+//
+// Generate a CMakePresets.json in destDir with one configure preset per
+// toolchain file found in the toolchains/ subdirectory.  Known toolchain
+// files (gcc.cmake, iar.cmake, llvm.cmake, arm.cmake) are mapped to
+// descriptive display names; any other .cmake files found are included with
+// a generic display name derived from the filename.
+//
+export function generateCMakePresetsFile(destDir: string) : void {
+    interface ConfigurePreset {
+        name: string ;
+        displayName: string ;
+        description: string ;
+        generator: string ;
+        toolchainFile: string ;
+        binaryDir: string ;
+        cacheVariables: {
+            CMAKE_BUILD_TYPE: string ;
+        } ;
+    }
+
+    const knownToolchains: Record<string, { displayName: string ; description: string }> = {
+        'gcc':  { displayName: 'GCC ARM',        description: 'Cross-compile for ARM Cortex-M using arm-none-eabi-gcc' },
+        'iar':  { displayName: 'IAR',             description: 'Cross-compile for ARM Cortex-M using IAR' },
+        'llvm': { displayName: 'LLVM/Clang',      description: 'Cross-compile for ARM Cortex-M using LLVM/Clang' },
+        'arm':  { displayName: 'Arm Compiler 6',  description: 'Cross-compile for ARM Cortex-M using Arm Compiler 6' },
+    } ;
+
+    const toolchainsDir = path.join(destDir, 'toolchains') ;
+    if (!fs.existsSync(toolchainsDir)) {
+        return ;
+    }
+
+    const cmakeFiles = fs.readdirSync(toolchainsDir)
+        .filter(f => f.endsWith('.cmake'))
+        .sort() ;
+
+    const configurePresets: ConfigurePreset[] = [] ;
+    for (const file of cmakeFiles) {
+        const name = path.basename(file, '.cmake') ;
+        const known = knownToolchains[name] ;
+        for (const [buildType, suffix] of [['Debug', 'debug'], ['Release', 'release']] as [string, string][]) {
+            const presetName = `${name}-${suffix}` ;
+            configurePresets.push({
+                name: presetName,
+                displayName: `${known?.displayName ?? name} ${buildType}`,
+                description: `${known?.description ?? `Cross-compile using ${name} toolchain`} (${buildType})`,
+                generator: 'Ninja',
+                toolchainFile: `\${sourceDir}/toolchains/${file}`,
+                binaryDir: `\${sourceDir}/build/${presetName}`,
+                cacheVariables: {
+                    CMAKE_BUILD_TYPE: buildType,
+                },
+            }) ;
+        }
+    }
+
+    if (configurePresets.length === 0) {
+        return ;
+    }
+
+    const presetsObj = {
+        version: 3,
+        cmakeMinimumRequired: { major: 3, minor: 21, patch: 0 },
+        configurePresets,
+    } ;
+
+    const presetsPath = path.join(destDir, 'CMakePresets.json') ;
+    fs.writeFileSync(presetsPath, JSON.stringify(presetsObj, null, 4) + '\n') ;
+}
+
+//
+// Classify a project by its core/security role based on naming convention:
+//   'cm55'    — project name contains 'cm55'
+//   'cm33_s'  — project name ends with '_s'
+//   'cm33_ns' — project name ends with '_ns'
+//   'cm33'    — all other projects (treated as CM33, non-secure behaviour)
+//
+function classifyProjectCore(name: string) : 'cm55' | 'cm33_s' | 'cm33_ns' | 'cm33' {
+    const lower = name.toLowerCase() ;
+    if (/cm55/.test(lower)) return 'cm55' ;
+    if (/[_-]ns$/.test(lower)) return 'cm33_ns' ;
+    if (/[_-]s$/.test(lower)) return 'cm33_s' ;
+    return 'cm33' ;
+}
+
+//
+// Generate .vscode/launch.json at destDir for a cmake-converted ModusToolbox
+// application.  Configurations follow the cortex-debug / openocd patterns used
+// by the original MTB per-project launch files:
+//
+//   • Each project gets a Launch (flash + debug) and an Attach configuration.
+//   • CM55 projects also get an "Add <proj> to CM33" external-GDB configuration
+//     used by the multi-core chained launch.
+//   • When CM55 and CM33 projects coexist a "Multi-Core Debug" configuration is
+//     added that chains the CM33 primary debug session with the CM55 session.
+//
+// The ELF and HEX paths use ${command:cmake.buildDirectory} so the CMake
+// extension's active configure preset determines the build directory at runtime.
+//
+export function generateVSCodeLaunchJson(
+    destDir: string,
+    projectNames: string[],
+    bspName?: string
+) : void {
+    const debugCert = '${workspaceFolder}/packets/debug_token.bin' ;
+
+    // GDB preamble that appears at the start of every override command sequence.
+    const gdbPreamble = [
+        'set mem inaccessible-by-default off',
+        '-enable-pretty-printing',
+        'set remotetimeout 60',
+    ] ;
+
+    function elfPath(projName: string) : string {
+        return `\${command:cmake.buildDirectory}/${projName}/${projName}.elf` ;
+    }
+
+    const combinedHexPath = '\${command:cmake.buildDirectory}/app_combined.hex' ;
+
+    function launchSearchDirs(projName: string) : string[] {
+        const dirs = [
+            `\${workspaceFolder}/${projName}`,
+        ] ;
+        if (bspName) {
+            dirs.push(`\${workspaceFolder}/bsps/${bspName}/config/GeneratedSource`) ;
+        }
+        return dirs ;
+    }
+
+    function attachSearchDirs(projName: string) : string[] {
+        return [
+            `\${workspaceFolder}/${projName}`,
+        ] ;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const configs: Record<string, any>[] = [] ;
+
+    for (const projName of projectNames) {
+        const coreType = classifyProjectCore(projName) ;
+        const isM55    = coreType === 'cm55' ;
+        const isNS     = coreType === 'cm33_ns' ;
+        const haltCmd  = isM55 ? 'cm55' : (isNS ? 'cm33_ns' : 'cm33') ;
+        const group    = isM55 ? `CM55_${projName}` : `CM33_${projName}` ;
+
+        // ---- Launch (flash + debug) ----------------------------------------
+        const flashCmds: string[] = [...gdbPreamble] ;
+        if (isM55) {
+            // Switch to CM33 context to flash, then start CM55
+            flashCmds.push('monitor targets cat1d.cm33') ;
+        }
+        flashCmds.push(`monitor flash write_image erase {${combinedHexPath}}`) ;
+        flashCmds.push('monitor reset init') ;
+        if (isM55) {
+            flashCmds.push('monitor mww 0x54004054 0') ;
+            flashCmds.push('monitor mww 0x54004050 4') ;
+        }
+        flashCmds.push(`monitor reset_halt ${haltCmd}`) ;
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const launchCfg: Record<string, any> = {
+            name: `${projName} Launch (KitProg3_MiniProg4)`,
+            type: 'cortex-debug',
+            request: 'launch',
+            preLaunchTask: 'CMake: Build',
+            cwd: `\${workspaceFolder}/${projName}`,
+            executable: elfPath(projName),
+            servertype: 'openocd',
+            searchDir: launchSearchDirs(projName),
+            configFiles: ['openocd.tcl'],
+            openOCDPreConfigLaunchCommands: [
+                `set DEBUG_CERTIFICATE ${debugCert}`,
+            ],
+            overrideLaunchCommands: flashCmds,
+            overrideRestartCommands: [`monitor reset_halt ${haltCmd}`],
+            postRestartSessionCommands: [],
+            breakAfterReset: true,
+            runToEntryPoint: 'main',
+            showDevDebugOutput: 'none',
+            presentation: { hidden: false, group },
+        } ;
+        if (isM55) {
+            launchCfg.numberOfProcessors = 2 ;
+            launchCfg.targetProcessor    = 1 ;
+        }
+        configs.push(launchCfg) ;
+
+        // ---- Attach ---------------------------------------------------------
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const attachCfg: Record<string, any> = {
+            name: `${projName} Attach (KitProg3_MiniProg4)`,
+            type: 'cortex-debug',
+            request: 'attach',
+            cwd: `\${workspaceFolder}/${projName}`,
+            executable: elfPath(projName),
+            servertype: 'openocd',
+            searchDir: attachSearchDirs(projName),
+            openOCDPreConfigLaunchCommands: [
+                'set ENABLE_ACQUIRE 0',
+                `set DEBUG_CERTIFICATE ${debugCert}`,
+            ],
+            configFiles: ['openocd.tcl'],
+            overrideAttachCommands: [
+                ...gdbPreamble,
+                'info threads',
+                `monitor reset_halt ${haltCmd} attach`,
+            ],
+            overrideRestartCommands: [`monitor reset_halt ${haltCmd} attach`],
+            postRestartSessionCommands: [],
+            breakAfterReset: true,
+            runToEntryPoint: 'main',
+            showDevDebugOutput: 'none',
+            presentation: { hidden: false, group },
+        } ;
+        if (isM55) {
+            attachCfg.numberOfProcessors = 2 ;
+            attachCfg.targetProcessor    = 1 ;
+        }
+        configs.push(attachCfg) ;
+
+        // ---- "Add <proj> to CM33" (external GDB, used by multi-core chain) --
+        if (isM55) {
+            configs.push({
+                name: `Add ${projName} to CM33 (KitProg3_MiniProg4)`,
+                type: 'cortex-debug',
+                request: 'attach',
+                cwd: `\${workspaceFolder}/${projName}`,
+                executable: elfPath(projName),
+                servertype: 'external',
+                gdbTarget: 'localhost:50001',
+                searchDir: attachSearchDirs(projName),
+                overrideAttachCommands: [
+                    ...gdbPreamble,
+                    'info threads',
+                    'monitor reset_halt cm55 multi',
+                ],
+                overrideRestartCommands: ['monitor reset_halt cm55 multi'],
+                postStartSessionCommands: ['continue'],
+                postRestartSessionCommands: [],
+                numberOfProcessors: 2,
+                targetProcessor: 1,
+                breakAfterReset: true,
+                runToEntryPoint: 'main',
+                showDevDebugOutput: 'none',
+                presentation: { hidden: true, group },
+            }) ;
+        }
+    }
+
+    // ---- Multi-core launch (CM33 primary + CM55 chained) --------------------
+    const cm55Projects  = projectNames.filter(n => classifyProjectCore(n) === 'cm55') ;
+    const cm33SProjects = projectNames.filter(n => classifyProjectCore(n) === 'cm33_s') ;
+    const cm33NsProjects = projectNames.filter(n => classifyProjectCore(n) === 'cm33_ns') ;
+    const allCm33Projects = projectNames.filter(n => {
+        const t = classifyProjectCore(n) ;
+        return t === 'cm33' || t === 'cm33_s' || t === 'cm33_ns' ;
+    }) ;
+
+    if (cm55Projects.length > 0 && allCm33Projects.length > 0) {
+        // Prefer CM33_S as the primary debugging target (secure-world ELF carries
+        // the most meaningful symbols for a TrustZone setup).
+        const primaryCM33 = cm33SProjects[0] ?? cm33NsProjects[0] ?? allCm33Projects[0] ;
+        const cm55Proj    = cm55Projects[0] ;
+        const haltCmd     = classifyProjectCore(primaryCM33) === 'cm33_ns' ? 'cm33_ns' : 'cm33' ;
+
+        // Add symbol files for all other CM33 projects so GDB can resolve
+        // symbols from both secure and non-secure worlds.
+        const preLaunchCmds = allCm33Projects
+            .filter(p => p !== primaryCM33)
+            .map(p => `add-symbol-file ${elfPath(p)}`) ;
+
+        // Use a slightly longer remote timeout for multi-core (matches original).
+        const multiFlashCmds = [
+            ...gdbPreamble.map(c => c === 'set remotetimeout 60' ? 'set remotetimeout 90' : c),
+            `monitor flash write_image erase {${combinedHexPath}}`,
+            'monitor reset init',
+            `monitor reset_halt ${haltCmd}`,
+        ] ;
+
+        // The openocd.tcl in the CM55 project directory has ENABLE_CM55 set,
+        // so configure openocd from that directory for multi-core support.
+        configs.push({
+            name: 'Multi-Core Debug (KitProg3_MiniProg4)',
+            type: 'cortex-debug',
+            request: 'launch',
+            preLaunchTask: 'CMake: Build',
+            cwd: `\${workspaceFolder}/${cm55Proj}`,
+            executable: elfPath(primaryCM33),
+            servertype: 'openocd',
+            searchDir: launchSearchDirs(cm55Proj),
+            configFiles: ['openocd.tcl'],
+            preLaunchCommands: preLaunchCmds,
+            openOCDPreConfigLaunchCommands: [
+                `set DEBUG_CERTIFICATE ${debugCert}`,
+            ],
+            overrideLaunchCommands: multiFlashCmds,
+            overrideRestartCommands: [`monitor reset_halt ${haltCmd}`],
+            postRestartSessionCommands: [],
+            numberOfProcessors: 2,
+            targetProcessor: 0,
+            breakAfterReset: true,
+            runToEntryPoint: 'main',
+            showDevDebugOutput: 'none',
+            presentation: { hidden: false, group: ' Multi-core' },
+            chainedConfigurations: {
+                enabled: true,
+                waitOnEvent: 'postInit',
+                lifecycleManagedByParent: true,
+                launches: [
+                    {
+                        name: `Add ${cm55Proj} to CM33 (KitProg3_MiniProg4)`,
+                        overrides: {
+                            postStartSessionCommands: ['tb main', 'continue'],
+                        },
+                    },
+                ],
+            },
+        }) ;
+    }
+
+    const launchJson = {
+        version: '0.2.0',
+        configurations: configs,
+    } ;
+
+    const vscodeDirPath = path.join(destDir, '.vscode') ;
+    fs.mkdirSync(vscodeDirPath, { recursive: true }) ;
+    const launchPath = path.join(vscodeDirPath, 'launch.json') ;
+    fs.writeFileSync(launchPath, JSON.stringify(launchJson, null, 4) + '\n') ;
+}
+
+//
+// Generate .vscode/tasks.json at destDir for a cmake-converted ModusToolbox
+// application.
+//
+// Tasks generated:
+//   • "CMake: Build"   — cmake-type task; builds the active configure preset.
+//   • "CMake: Clean"   — cmake-type task; cleans the active configure preset.
+//   • "CMake: Rebuild" — sequence that runs Clean then Build.
+//   • "Build [<preset>]" / "Clean [<preset>]" — one shell-based task pair per
+//     configure preset found in the toolchains/ directory, so a specific preset
+//     can be built without changing the active preset in the status bar.
+//
+export function generateVSCodeTasksJson(destDir: string) : void {
+    // Collect the preset names from the toolchains/ directory, mirroring the
+    // logic in generateCMakePresetsFile.
+    const toolchainsDir = path.join(destDir, 'toolchains') ;
+    const presetNames: string[] = [] ;
+    if (fs.existsSync(toolchainsDir)) {
+        const cmakeFiles = fs.readdirSync(toolchainsDir)
+            .filter(f => f.endsWith('.cmake'))
+            .sort() ;
+        for (const file of cmakeFiles) {
+            const name = path.basename(file, '.cmake') ;
+            presetNames.push(`${name}-debug`, `${name}-release`) ;
+        }
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tasks: any[] = [] ;
+
+    // ── cmake-type tasks (use whatever preset is active in the CMake extension) ──
+
+    tasks.push({
+        type: 'cmake',
+        label: 'CMake: Build',
+        command: 'build',
+        targets: ['all'],
+        group: {
+            kind: 'build',
+            isDefault: true,
+        },
+        problemMatcher: '$gcc',
+    }) ;
+
+    tasks.push({
+        type: 'cmake',
+        label: 'CMake: Clean',
+        command: 'clean',
+        targets: ['all'],
+        group: 'build',
+        problemMatcher: [],
+    }) ;
+
+    tasks.push({
+        label: 'CMake: Rebuild',
+        dependsOrder: 'sequence',
+        dependsOn: ['CMake: Clean', 'CMake: Build'],
+        group: 'build',
+        problemMatcher: '$gcc',
+    }) ;
+
+    // ── per-preset shell tasks ─────────────────────────────────────────────────
+
+    for (const preset of presetNames) {
+        const buildDir = `\${workspaceFolder}/build/${preset}` ;
+
+        tasks.push({
+            label: `Build [${preset}]`,
+            type: 'shell',
+            command: 'cmake',
+            args: ['--build', buildDir],
+            group: 'build',
+            problemMatcher: '$gcc',
+        }) ;
+
+        tasks.push({
+            label: `Clean [${preset}]`,
+            type: 'shell',
+            command: 'cmake',
+            args: ['--build', buildDir, '--target', 'clean'],
+            group: 'build',
+            problemMatcher: [],
+        }) ;
+    }
+
+    const tasksJson = {
+        version: '2.0.0',
+        tasks,
+    } ;
+
+    const vscodeDirPath = path.join(destDir, '.vscode') ;
+    fs.mkdirSync(vscodeDirPath, { recursive: true }) ;
+    const tasksPath = path.join(vscodeDirPath, 'tasks.json') ;
+    fs.writeFileSync(tasksPath, JSON.stringify(tasksJson, null, 4) + '\n') ;
+}
+
+//
+// Generate .vscode/settings.json at destDir for a cmake-converted ModusToolbox
+// application.  Provides the cortex-debug extension settings needed to locate
+// the ARM toolchain, OpenOCD, and J-Link GDB server on each platform.
+//
+export function generateVSCodeSettingsJson(destDir: string) : void {
+    const settings = {
+        'cortex-debug.armToolchainPath':
+            'C:/Infineon/mtbgccpackage/gcc/bin',
+        'cortex-debug.openocdPath': 'openocd',
+        'cortex-debug.JLinkGDBServerPath.windows':
+            'C:/Program Files/SEGGER/JLink/JLinkGDBServerCL.exe',
+        'cortex-debug.JLinkGDBServerPath.osx':
+            '/Applications/SEGGER/JLink/JLinkGDBServerCLExe',
+        'cortex-debug.JLinkGDBServerPath.linux':
+            'JLinkGDBServerCLExe',
+    } ;
+
+    const vscodeDirPath = path.join(destDir, '.vscode') ;
+    fs.mkdirSync(vscodeDirPath, { recursive: true }) ;
+    const settingsPath = path.join(vscodeDirPath, 'settings.json') ;
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 4) + '\n') ;
 }

@@ -11,6 +11,7 @@ export interface Phase1Options {
     status: StatusTracker;
     limit?: number;
     include?: string[];
+    skip?: Set<number>;
 }
 
 export interface BspAppPair {
@@ -78,6 +79,17 @@ export async function runPhase1(opts: Phase1Options): Promise<BspAppPair[]> {
 
     for (const { bsp, app } of pairs) {
         const destDir = path.join(opts.mtbdir, bsp);
+        const appDir = path.join(destDir, app);
+
+        if (opts.skip?.has(1) && fs.existsSync(appDir)) {
+            done++;
+            const pct = Math.round((done / total) * 100);
+            opts.status.updateEntry(bsp, app, { create_status: 'skipped' });
+            console.log(`    Skipping phase 1 for ${app}/${bsp} (directory exists) (${pct}% of total)`);
+            succeeded.push({ bsp, app });
+            continue;
+        }
+
         fs.mkdirSync(destDir, { recursive: true });
 
         const logFile = path.join(opts.logDir, `${bsp}_${app}_create.log`);

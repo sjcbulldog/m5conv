@@ -8,6 +8,7 @@ import * as fs from 'fs';
 async function main(): Promise<void> {
     const args = parseArgs(process.argv);
     const status = new StatusTracker(args.status);
+    const skip = new Set(args.skip ?? []);
 
     // Clear and recreate the logs directory
     if (fs.existsSync(args.logs)) {
@@ -24,6 +25,7 @@ async function main(): Promise<void> {
         status,
         limit: args.limit,
         include: args.include,
+        skip,
     });
 
     // Phase 2: convert to cmake
@@ -35,6 +37,8 @@ async function main(): Promise<void> {
         depends: args.depends,
         logDir: args.logs,
         status,
+        skip,
+        targets: args.targets,
     });
 
     // Phase 3: cmake + ninja
@@ -43,6 +47,7 @@ async function main(): Promise<void> {
         cmakedir: args.cmakedir,
         logDir: args.logs,
         status,
+        skip,
     });
 }
 
