@@ -3255,3 +3255,186 @@ export function generateVSCodeSettingsJson(destDir: string) : void {
     const settingsPath = path.join(vscodeDirPath, 'settings.json') ;
     fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 4) + '\n') ;
 }
+
+//
+// Scan the wifi-host-driver and companion wifi-resources directories for
+// CLM blob, firmware, and NVRAM resource files then append conditional
+// add_compile_definitions() blocks to the wifi-host-driver CMakeLists.txt.
+//
+// File layout scanned:
+//   wifiHostDriverDir/WHD/COMPONENT_WIFI6/resources/firmware/
+//       COMPONENT_{chip}/COMPONENT_SM/{fw}.trxcse|trxse|trx
+//   wifiResourcesDir/clm/COMPONENT_WIFI6/
+//       COMPONENT_{chip}/COMPONENT_{board}/{clm}.clm_blob
+//   wifiResourcesDir/nvram/COMPONENT_WIFI6/
+//       COMPONENT_{chip}/COMPONENT_{board}/{nvram}.txt
+//
+// For each unique (chip, board) combination a conditional block is emitted
+// that sets CLM_IMAGE_NAME, FW_IMAGE_NAME, and NVRAM_IMAGE_NAME.
+// mfgtest file variants are skipped.  The -sense firmware variant
+// (present for chips that support WLANSENSE) is emitted inside a nested
+// if/else(COMPONENT_WLANSENSE) block.
+//
+export function generateWifiHostDriverResourceDefines(
+    wifiHostDriverDir: string,
+    wifiResourcesDir: string,
+) : void {
+    // -- Scan firmware files --
+    // Map: chipComp -> { normal?: relPath, sense?: relPath }
+    interface FwEntry { normal?: string ; sense?: string }
+    const fwByChip = new Map<string, FwEntry>() ;
+
+    const fwBase = path.join(wifiHostDriverDir, 'WHD', 'COMPONENT_WIFI6', 'resources', 'firmware') ;
+    if (fs.existsSync(fwBase)) {
+        for (const chipEntry of fs.readdirSync(fwBase, { withFileTypes: true })) {
+            if (!chipEntry.isDirectory() || !chipEntry.name.startsWith('COMPONENT_')) continue ;
+            const chipComp = chipEntry.name ;
+            const smDir = path.join(fwBase, chipComp, 'COMPONENT_SM') ;
+            if (!fs.existsSync(smDir)) continue ;
+            const entry: FwEntry = {} ;
+            for (const fwFile of fs.readdirSync(smDir)) {
+                if (!/\.(trxcse|trxse|trx)$/i.test(fwFile)) continue ;
+                if (fwFile.includes('-mfgtest')) continue ;
+                const relPath = `WHD/COMPONENT_WIFI6/resources/firmware/${chipComp}/COMPONENT_SM/${fwFile}` ;
+                if (fwFile.includes('-sense')) {
+                    entry.sense = relPath ;
+                } else {
+                    entry.normal = relPath ;
+                }
+            }
+            if (entry.normal || entry.sense) {
+                fwByChip.set(chipComp, entry) ;
+            }
+        }
+    }
+
+    // -- Scan CLM files --
+    // Map: 'chipComp/boardComp' -> relPath (relative to wifiResourcesDir)
+    const clmByChipBoard = new Map<string, string>() ;
+    const clmBase = path.join(wifiResourcesDir, 'clm', 'COMPONENT_WIFI6') ;
+    if (fs.existsSync(clmBase)) {
+        for (const chipEntry of fs.readdirSync(clmBase, { withFileTypes: true })) {
+            if (!chipEntry.isDirectory() || !chipEntry.name.startsWith('COMPONENT_')) continue ;
+            const chipComp = chipEntry.name ;
+            const chipDir = path.join(clmBase, chipComp) ;
+            for (const boardEntry of fs.readdirSync(chipDir, { withFileTypes: true })) {
+                if (!boardEntry.isDirectory() || !boardEntry.name.startsWith('COMPONENT_')) continue ;
+                const boardComp = boardEntry.name ;
+                const boardDir = path.join(chipDir, boardComp) ;
+                for (const clmFile of fs.readdirSync(boardDir)) {
+                    if (!clmFile.endsWith('.clm_blob')) continue ;
+                    if (clmFile.includes('-mfgtest')) continue ;
+                    clmByChipBoard.set(
+                        `${chipComp}/${boardComp}`,
+                        `clm/COMPONENT_WIFI6/${chipComp}/${boardComp}/${clmFile}`,
+                    ) ;
+                    break ; // one non-mfgtest CLM per board
+                }
+            }
+        }
+    }
+
+    // -- Scan NVRAM files --
+    // Map: 'chipComp/boardComp' -> relPath (relative to wifiResourcesDir)
+    const nvramByChipBoard = new Map<string, string>() ;
+    const nvramBase = path.join(wifiResourcesDir, 'nvram', 'COMPONENT_WIFI6') ;
+    if (fs.existsSync(nvramBase)) {
+        for (const chipEntry of fs.readdirSync(nvramBase, { withFileTypes: true })) {
+            if (!chipEntry.isDirectory() || !chipEntry.name.startsWith('COMPONENT_')) continue ;
+            const chipComp = chipEntry.name ;
+            const chipDir = path.join(nvramBase, chipComp) ;
+            for (const boardEntry of fs.readdirSync(chipDir, { withFileTypes: true })) {
+                if (!boardEntry.isDirectory() || !boardEntry.name.startsWith('COMPONENT_')) continue ;
+                const boardComp = boardEntry.name ;
+                const boardDir = path.join(chipDir, boardComp) ;
+                for (const nvramFile of fs.readdirSync(boardDir)) {
+                    if (!nvramFile.endsWith('.txt')) continue ;
+                    nvramByChipBoard.set(
+                        `${chipComp}/${boardComp}`,
+                        `nvram/COMPONENT_WIFI6/${chipComp}/${boardComp}/${nvramFile}`,
+                    ) ;
+                    break ; // one NVRAM file per board
+                }
+            }
+        }
+    }
+
+    // -- Build conditional define blocks --
+    const allKeys = [...new Set([...clmByChipBoard.keys(), ...nvramByChipBoard.keys()])] ;
+    allKeys.sort() ;
+
+    const lines: string[] = [] ;
+    lines.push('') ;
+    lines.push('#') ;
+    lines.push('# Conditional resource file defines for wifi-host-driver.') ;
+    lines.push('# CLM and NVRAM files are sourced from the companion wifi-resources asset.') ;
+    lines.push('#') ;
+
+    for (const key of allKeys) {
+        const slashIdx = key.indexOf('/') ;
+        const chipComp  = key.slice(0, slashIdx) ;
+        const boardComp = key.slice(slashIdx + 1) ;
+
+        const fwEntry    = fwByChip.get(chipComp) ;
+        const clmRelPath  = clmByChipBoard.get(key) ;
+        const nvramRelPath = nvramByChipBoard.get(key) ;
+
+        // CMake identifiers cannot contain hyphens — replace with underscores.
+        const boardCond = boardComp.replace(/-/g, '_') ;
+
+        const hasSense = !!(fwEntry?.sense) ;
+
+        lines.push('') ;
+        lines.push(`if(COMPONENT_WIFI6 AND ${chipComp} AND COMPONENT_SM AND ${boardCond})`) ;
+
+        if (!hasSense) {
+            // Simple case: single add_compile_definitions block
+            lines.push('    add_compile_definitions(') ;
+            if (clmRelPath) {
+                lines.push(`        CLM_IMAGE_NAME="\${CMAKE_CURRENT_SOURCE_DIR}/../wifi-resources/${clmRelPath}"`) ;
+            }
+            if (fwEntry?.normal) {
+                lines.push(`        FW_IMAGE_NAME="\${CMAKE_CURRENT_SOURCE_DIR}/${fwEntry.normal}"`) ;
+            }
+            if (nvramRelPath) {
+                lines.push(`        NVRAM_IMAGE_NAME="\${CMAKE_CURRENT_SOURCE_DIR}/../wifi-resources/${nvramRelPath}"`) ;
+            }
+            lines.push('    )') ;
+        } else {
+            // Chip has a WLANSENSE sense firmware variant.
+            // CLM and NVRAM are shared; only FW_IMAGE_NAME differs by mode.
+            if (clmRelPath || nvramRelPath) {
+                lines.push('    add_compile_definitions(') ;
+                if (clmRelPath) {
+                    lines.push(`        CLM_IMAGE_NAME="\${CMAKE_CURRENT_SOURCE_DIR}/../wifi-resources/${clmRelPath}"`) ;
+                }
+                if (nvramRelPath) {
+                    lines.push(`        NVRAM_IMAGE_NAME="\${CMAKE_CURRENT_SOURCE_DIR}/../wifi-resources/${nvramRelPath}"`) ;
+                }
+                lines.push('    )') ;
+            }
+            if (fwEntry.sense || fwEntry.normal) {
+                lines.push('    if(COMPONENT_WLANSENSE)') ;
+                if (fwEntry.sense) {
+                    lines.push('        add_compile_definitions(') ;
+                    lines.push(`            FW_IMAGE_NAME="\${CMAKE_CURRENT_SOURCE_DIR}/${fwEntry.sense}"`) ;
+                    lines.push('        )') ;
+                }
+                if (fwEntry.normal) {
+                    lines.push('    else()') ;
+                    lines.push('        add_compile_definitions(') ;
+                    lines.push(`            FW_IMAGE_NAME="\${CMAKE_CURRENT_SOURCE_DIR}/${fwEntry.normal}"`) ;
+                    lines.push('        )') ;
+                }
+                lines.push('    endif()') ;
+            }
+        }
+
+        lines.push('endif()') ;
+    }
+
+    lines.push('') ;
+
+    const cmakePath = path.join(wifiHostDriverDir, 'CMakeLists.txt') ;
+    fs.appendFileSync(cmakePath, lines.join('\n')) ;
+}

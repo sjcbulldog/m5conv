@@ -1,5 +1,5 @@
 import { ModusToolboxEnvironment, MTBLoadFlags } from "./mtbenv";
-import { collectSources, collectHeaders, collectLibraries, collectProjectHeaderDirs, generateObjectLibraryCMakeLists, generateHeaderOnlyCMakeLists, generateLibraryAssetCMakeLists, generateProjectCMakeLists, generateTopLevelCMakeLists, generateAppInfoCMake, generateProjInfoCMake, generateGccToolchainCMake, generateIarToolchainCMake, generateLlvmToolchainCMake, generateArmToolchainCMake, generateBspCMakeInclude, generateCMakePresetsFile, generateVSCodeLaunchJson, generateVSCodeTasksJson, generateVSCodeSettingsJson, AssetSubdirectory, loadDependsDB, resolveIncludeDirs, resolveAssetExports, resolveAssetInternals, hasActiveSources, readProjectDefinesByConfig, readProjectDefinesForConfig, fixDefineFilePaths, readProjectFlagsByConfig, readProjectFlagsForConfig, mergeProjectFlagsByConfig, remapFlagPaths, ProjectFlagsByConfig, ProjectFlagsByToolchain, DependsEntry, ConditionalIncludeDir, processSignCombineJson, SignCombineInfo } from './cmakeutil';
+import { collectSources, collectHeaders, collectLibraries, collectProjectHeaderDirs, generateObjectLibraryCMakeLists, generateHeaderOnlyCMakeLists, generateLibraryAssetCMakeLists, generateProjectCMakeLists, generateTopLevelCMakeLists, generateAppInfoCMake, generateProjInfoCMake, generateGccToolchainCMake, generateIarToolchainCMake, generateLlvmToolchainCMake, generateArmToolchainCMake, generateBspCMakeInclude, generateCMakePresetsFile, generateVSCodeLaunchJson, generateVSCodeTasksJson, generateVSCodeSettingsJson, AssetSubdirectory, loadDependsDB, resolveIncludeDirs, resolveAssetExports, resolveAssetInternals, hasActiveSources, readProjectDefinesByConfig, readProjectDefinesForConfig, fixDefineFilePaths, readProjectFlagsByConfig, readProjectFlagsForConfig, mergeProjectFlagsByConfig, remapFlagPaths, ProjectFlagsByConfig, ProjectFlagsByToolchain, DependsEntry, ConditionalIncludeDir, processSignCombineJson, SignCombineInfo, generateWifiHostDriverResourceDefines } from './cmakeutil';
 import { MTBUtils } from './mtbenv/misc/mtbutils';
 import * as winston from 'winston';
 import * as fs from 'fs';
@@ -255,6 +255,37 @@ export class MTB5Converter {
                     // No source or library files - generate a header-only INTERFACE target
                     generateHeaderOnlyCMakeLists(destPath, assetName, includeDirs) ;
                     this.logger_.info(`Generated header-only CMakeLists.txt for asset '${assetName}'`) ;
+                }
+
+                // Special case: wifi-host-driver requires the companion wifi-resources
+                // asset to be present and its CMakeLists.txt to include conditional
+                // resource defines (CLM_IMAGE_NAME, FW_IMAGE_NAME, NVRAM_IMAGE_NAME).
+                if (assetName === 'wifi-host-driver') {
+                    const wifiResourcesDestPath = path.join(destAssetsDir, 'wifi-resources') ;
+
+                    if (!this.cmakeOnly && !copiedAssets.has('wifi-resources') && !fs.existsSync(wifiResourcesDestPath)) {
+                        const wifiResourcesSrcPath = path.join(path.dirname(srcPath), 'wifi-resources') ;
+                        if (fs.existsSync(wifiResourcesSrcPath)) {
+                            this.logger_.info(`Copying companion asset 'wifi-resources' for wifi-host-driver`) ;
+                            const resSkipped = await copyDirTolerant(wifiResourcesSrcPath, wifiResourcesDestPath) ;
+                            warnSkippedFiles(this.logger_, "asset 'wifi-resources'", resSkipped) ;
+                            const gitDir = path.join(wifiResourcesDestPath, '.git') ;
+                            if (fs.existsSync(gitDir)) {
+                                try {
+                                    await fs.promises.rm(gitDir, { recursive: true, force: true }) ;
+                                } catch (err) {
+                                    this.logger_.warn(`Failed to remove .git from wifi-resources: ${err}`) ;
+                                }
+                            }
+                        } else {
+                            this.logger_.warn(`Companion asset 'wifi-resources' not found at '${wifiResourcesSrcPath}' - skipping resource defines`) ;
+                        }
+                    }
+
+                    if (fs.existsSync(wifiResourcesDestPath)) {
+                        generateWifiHostDriverResourceDefines(destPath, wifiResourcesDestPath) ;
+                        this.logger_.info(`Appended WiFi resource defines to wifi-host-driver CMakeLists.txt`) ;
+                    }
                 }
 
                 copiedAssets.add(assetName) ;
