@@ -759,6 +759,78 @@ export function mergeProjectFlagsByConfig(
 }
 
 //
+// Rewrite ${CMAKE_CURRENT_SOURCE_DIR}-relative paths in linker flags, linker
+// library inputs (.ldlibs), and link-search directories (.ldflags -L) so that
+// any token whose resolved absolute path falls under a known source-asset
+// directory is replaced with the cmake path to the corresponding destination
+// asset.
+//
+// Background: fixRelativePath() and fixLdLibPath() convert bare relative paths
+// (e.g. "../../mtb_shared/wifi-host-driver/...") to
+// "${CMAKE_CURRENT_SOURCE_DIR}/../../mtb_shared/..." using the cmake source-dir
+// variable.  In the original ModusToolbox workspace that relative path was
+// correct because the project and mtb_shared/ share the same ancestor directory.
+// In the converted cmake project the same asset lives under assets/<name>/,
+// so the old path no longer resolves to anything.  This function detects those
+// stale paths and rewrites them to point at assets/<name>/...
+//
+// @param flags        Flag structure to update in-place.
+// @param srcProjDir   Absolute path to the source project directory (the base
+//                     that relative paths were originally measured from).
+// @param assetPathMap Map from normalised absolute source-asset path to the
+//                     cmake path for the destination asset, e.g.:
+//                       "C:/sdk/mtb5/mtb_shared/wifi-host-driver"
+//                         → "${CMAKE_CURRENT_SOURCE_DIR}/../assets/wifi-host-driver"
+//
+export function remapFlagPaths(
+    flags: ProjectFlagsByToolchain,
+    srcProjDir: string,
+    assetPathMap: Map<string, string>,
+) : void {
+    if (assetPathMap.size === 0) return ;
+
+    const cmakeSrcVar = '${CMAKE_CURRENT_SOURCE_DIR}/' ;
+
+    // Rewrite a single token that may contain a ${CMAKE_CURRENT_SOURCE_DIR}/...
+    // embedded path.  If the resolved absolute path starts with a known source
+    // asset directory it is replaced with the corresponding cmake dest path.
+    function remapToken(token: string) : string {
+        const idx = token.indexOf(cmakeSrcVar) ;
+        if (idx < 0) return token ;
+
+        const prefix  = token.slice(0, idx) ;            // e.g. "-T", "-Wl,", ""
+        const relPath = token.slice(idx + cmakeSrcVar.length) ;
+
+        // Resolve the relative portion against the source project directory so
+        // we can compare it against the known asset source paths.
+        const absPath = path.resolve(srcProjDir, relPath).replace(/\\/g, '/') ;
+
+        for (const [srcAsset, cmakeDest] of assetPathMap) {
+            const normSrc = srcAsset.replace(/\\/g, '/') ;
+            if (absPath === normSrc || absPath.startsWith(normSrc + '/')) {
+                const rest = absPath.slice(normSrc.length) ; // '' or '/sub/path'
+                return `${prefix}${cmakeDest}${rest}` ;
+            }
+        }
+        return token ;
+    }
+
+    function remapSet(fset: ConfigFlagSet) : void {
+        fset.debug   = fset.debug.map(remapToken) ;
+        fset.release = fset.release.map(remapToken) ;
+        if (fset.linkDirs) {
+            fset.linkDirs = fset.linkDirs.map(remapToken) ;
+        }
+    }
+
+    for (const tc of Object.values(flags)) {
+        // Only linker-related sets carry cross-directory file paths.
+        remapSet(tc.link) ;
+        remapSet(tc.libs) ;
+    }
+}
+
+//
 // Split a ConfigFlagSet into flags common to both configs, debug-only, and
 // release-only.  When only one config has flags, all flags are returned in
 // 'common' so they apply unconditionally.

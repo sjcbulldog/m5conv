@@ -12,13 +12,10 @@
             "console": "integratedTerminal",
             "args": [
                 "--force",
-<<<<<<< HEAD:conv/.vscode/launch.json
-=======
                 "--depends", "${workspaceFolder}/depends.json",
->>>>>>> 20cfe13e5f4b89fe4e66c0d2be99b2cb30a6a2e2:mtb2cmake/.vscode/launch.json
                 "--target", "gcc",
-                "--source", "${workspaceFolder}/../projects/mtb/edge/${input:mtbProjectName}",
-                "--dest", "${workspaceFolder}/../projects/mtb5/edge/${input:mtbProjectName}",
+                "--source", "c:/sdk/mtb/${input:mtbProjectName}",
+                "--dest", "c:/sdk/mtb5/${input:mtbProjectName}",
             ]
         }
     ],

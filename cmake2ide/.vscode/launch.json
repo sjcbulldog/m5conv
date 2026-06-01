@@ -10,8 +10,8 @@
       "program": "${workspaceFolder}/src/index.ts",
       "args" : [
         "--force", 
-        "--input", "../projects/mtb5/${input:mtbProjectName}", 
-        "--iar", "../projects/iar/${input:mtbProjectName}"
+        "--input", "C:/sdk/mtb5/${input:mtbProjectName}", 
+        "--iar", "C:/sdk/iar/${input:mtbProjectName}"
       ],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
@@ -26,8 +26,8 @@
       "program": "${workspaceFolder}/src/index.ts",
       "args" : [
         "--force", 
-        "--input", "../projects/mtb5/${input:mtbProjectName}", 
-        "--eclipse", "../projects/eclipse/${input:mtbProjectName}"
+        "--input", "C:/sdk/mtb5/${input:mtbProjectName}", 
+        "--eclipse", "C:/sdk/eclipse/${input:mtbProjectName}"
       ],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",

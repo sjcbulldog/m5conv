@@ -36,6 +36,9 @@ interface ProjectPlan {
   /** Resolved absolute paths of include dirs that lie under the source tree. */
   absIncludeDirs: string[];
   sources: Array<{ absSource: string; projectRelPath: string; group: string }>;
+  /** Absolute source-tree roots for every target that contributes to the project.
+   *  Used to copy the complete asset directory (all files) into the IAR workspace. */
+  assetSourceDirs: string[];
   /** Extra linker flags not handled natively by IAR IDE project settings. */
   extraLinkFlags: string[];
   /** Absolute path to the linker ICF file extracted from --config= flag. */
@@ -110,15 +113,16 @@ export class IarGenerator {
     if (root.type === "UTILITY") {
       const scRelPath = await this.writeSignCombineProject(root, hexPathMap);
       if (scRelPath) {
+        const scName = path.basename(scRelPath, ".ewp");
         projectRefs.push({
           ewpRelPath: scRelPath,
-          name: root.name,
+          name: scName,
           dependencies: projectRefs.map((r) => r.name),
         });
       }
     }
 
-    const wsName = this.opts.workspaceName ?? IarGenerator.stripElfExt(root.name).replace(/[^\w.-]+/g, "_");
+    const wsName = this.opts.workspaceName ?? path.basename(this.model.paths.source);
     const wsFile = path.join(this.opts.destDir, `${wsName}.eww`);
     await fs.writeFile(
       wsFile,
@@ -178,9 +182,11 @@ export class IarGenerator {
             includesSeen.add(rebased);
             includesOrdered.push(rebased);
           }
-          const absInc = path.isAbsolute(inc.path)
-            ? inc.path
-            : path.resolve(this.opts.sourceDir, inc.path);
+          const absInc = path.resolve(
+            path.isAbsolute(inc.path)
+              ? inc.path
+              : path.join(this.opts.sourceDir, inc.path),
+          );
           if (!absIncludeDirsSeen.has(absInc) && this.isUnderSourceDir(absInc)) {
             absIncludeDirsSeen.add(absInc);
             absIncludeDirs.push(absInc);
@@ -211,6 +217,29 @@ export class IarGenerator {
     };
     visit(exe);
 
+    // Post-pass: collect asset dirs from every source file and include dir that
+    // made it into the plan.  An "asset" is any subtree under
+    // <sourceDir>/assets/<name>/ — if ANY file from that subtree is needed by
+    // the project, the whole <name> directory must be copied.
+    const assetsRoot = path.join(path.resolve(this.opts.sourceDir), "assets");
+    const assetSourceDirs: string[] = [];
+    const assetSourceDirsSeen = new Set<string>();
+
+    const considerForAsset = (absPath: string): void => {
+      const rel = path.relative(assetsRoot, path.resolve(absPath));
+      if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return;
+      const assetName = rel.split(path.sep)[0];
+      if (!assetName) return;
+      const assetDir = path.join(assetsRoot, assetName);
+      const key = assetDir.toLowerCase();
+      if (assetSourceDirsSeen.has(key)) return;
+      assetSourceDirsSeen.add(key);
+      assetSourceDirs.push(assetDir);
+    };
+
+    for (const s of sources) considerForAsset(s.absSource);
+    for (const incDir of absIncludeDirs) considerForAsset(incDir);
+
     const cpu = this.detectCpu(exe);
     const chipEntry = await this.detectChipEntry(defines, cpu);
     return {
@@ -222,6 +251,7 @@ export class IarGenerator {
       includes: includesOrdered,
       absIncludeDirs,
       sources,
+      assetSourceDirs,
       extraLinkFlags: this.extractExtraLinkFlags(exe),
       icfFile: this.extractIcfFile(exe),
       cmseLibOut: this.extractCmseLibOut(exe),
@@ -432,16 +462,32 @@ export class IarGenerator {
       }
     }
 
-    // Also copy header files that sit alongside the copied source files.
+    // Build a quick lookup for asset directories so we can skip them in the
+    // companion scan (they are handled in full by copyAssetDir below).
+    const assetDirSetLower = new Set(
+      plan.assetSourceDirs.map((d) => path.resolve(d).toLowerCase()),
+    );
+    const isUnderAssetDir = (absDir: string): boolean => {
+      const lower = path.resolve(absDir).toLowerCase();
+      for (const ad of assetDirSetLower) {
+        if (lower === ad || lower.startsWith(ad + path.sep)) return true;
+      }
+      return false;
+    };
+
+    // Copy header and companion source files that sit alongside copied sources
+    // (e.g. user-customizable stubs not listed in target_sources).
+    // Skipped for asset dirs — those are copied in full below.
     const scannedDirs = new Set<string>();
     for (const s of plan.sources) {
       const srcDir = path.dirname(s.absSource);
       if (scannedDirs.has(srcDir)) continue;
+      if (isUnderAssetDir(srcDir)) continue;
       scannedDirs.add(srcDir);
 
-      let entries: string[];
+      let entries: Dirent[];
       try {
-        entries = await fs.readdir(srcDir);
+        entries = await fs.readdir(srcDir, { withFileTypes: true });
       } catch {
         continue;
       }
@@ -450,20 +496,33 @@ export class IarGenerator {
       const headerGroup = s.group.replace(/^Source Files\//, "Header Files/");
 
       for (const entry of entries) {
-        if (!HEADER_EXTS.has(path.extname(entry).toLowerCase())) continue;
-        const absHeader = path.join(srcDir, entry);
-        const relHeader = `${destRelDir}/${entry}`;
-        const destHeader = path.join(projDir, relHeader);
-        if (copied.has(destHeader)) continue;
-        copied.add(destHeader);
+        if (entry.isDirectory()) continue;
+        const ext = path.extname(entry.name).toLowerCase();
+        const isHeader = HEADER_EXTS.has(ext);
+        const isSource = !isHeader && SOURCE_EXTS.has(ext);
+        if (!isHeader && !isSource) continue;
+        const absFile = path.join(srcDir, entry.name);
+        const relFile = `${destRelDir}/${entry.name}`;
+        const destFile = path.join(projDir, relFile);
+        if (copied.has(destFile)) continue;
+        copied.add(destFile);
+        const group = isHeader ? headerGroup : s.group;
         try {
-          await fs.mkdir(path.dirname(destHeader), { recursive: true });
-          await fs.copyFile(absHeader, destHeader);
-          files.push({ projectRelPath: relHeader, group: headerGroup });
+          await fs.mkdir(path.dirname(destFile), { recursive: true });
+          await fs.copyFile(absFile, destFile);
+          files.push({ projectRelPath: relFile, group });
         } catch (err) {
           if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
         }
       }
+    }
+
+    // Copy each complete asset directory so all asset files are present in the
+    // IAR project, including files that participate via #include but are not
+    // listed in CMakeLists.txt.  Destination: PROJNAME/src/assets/<name>/
+    // Only cmake-listed sources (already in `files`) appear in the .ewp.
+    for (const assetDir of plan.assetSourceDirs) {
+      await this.copyAssetDir(assetDir, projDir, copied);
     }
 
     // Recursively copy all headers from every include directory under the source tree.
@@ -495,7 +554,7 @@ export class IarGenerator {
    * Returns the workspace-relative .ewp path, or undefined on failure.
    */
   private async writeSignCombineProject(root: Target, hexPathMap: Map<string, string>): Promise<string | undefined> {
-    const projName = root.name;
+    const projName = "signed-image";
     const projDir = path.join(this.opts.destDir, projName);
     await fs.mkdir(projDir, { recursive: true });
 
@@ -611,6 +670,42 @@ export class IarGenerator {
       }
     }
     return undefined;
+  }
+
+  /**
+   * Recursively copies every file in an asset directory into the IAR project
+   * (destination determined by computeProjectRelPath).
+   * Does NOT add entries to the .ewp file list — only cmake-listed sources
+   * (already added from plan.sources) appear in the project.
+   */
+  private async copyAssetDir(
+    srcDir: string,
+    projDir: string,
+    copied: Set<string>,
+  ): Promise<void> {
+    let entries: Dirent[];
+    try {
+      entries = await fs.readdir(srcDir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const absSrc = path.join(srcDir, entry.name);
+      if (entry.isDirectory()) {
+        await this.copyAssetDir(absSrc, projDir, copied);
+      } else {
+        const relPath = this.computeProjectRelPath(absSrc);
+        const destAbs = path.join(projDir, relPath);
+        if (copied.has(destAbs)) continue;
+        copied.add(destAbs);
+        try {
+          await fs.mkdir(path.dirname(destAbs), { recursive: true });
+          await fs.copyFile(absSrc, destAbs);
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+        }
+      }
+    }
   }
 
   private async copyHeadersRecursive(

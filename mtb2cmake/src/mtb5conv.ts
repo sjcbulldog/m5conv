@@ -1,5 +1,5 @@
 import { ModusToolboxEnvironment, MTBLoadFlags } from "./mtbenv";
-import { collectSources, collectHeaders, collectLibraries, collectProjectHeaderDirs, generateObjectLibraryCMakeLists, generateHeaderOnlyCMakeLists, generateLibraryAssetCMakeLists, generateProjectCMakeLists, generateTopLevelCMakeLists, generateAppInfoCMake, generateProjInfoCMake, generateGccToolchainCMake, generateIarToolchainCMake, generateLlvmToolchainCMake, generateArmToolchainCMake, generateBspCMakeInclude, generateCMakePresetsFile, generateVSCodeLaunchJson, generateVSCodeTasksJson, generateVSCodeSettingsJson, AssetSubdirectory, loadDependsDB, resolveIncludeDirs, resolveAssetExports, resolveAssetInternals, hasActiveSources, readProjectDefinesByConfig, readProjectDefinesForConfig, fixDefineFilePaths, readProjectFlagsByConfig, readProjectFlagsForConfig, mergeProjectFlagsByConfig, ProjectFlagsByConfig, ProjectFlagsByToolchain, DependsEntry, ConditionalIncludeDir, processSignCombineJson, SignCombineInfo } from './cmakeutil';
+import { collectSources, collectHeaders, collectLibraries, collectProjectHeaderDirs, generateObjectLibraryCMakeLists, generateHeaderOnlyCMakeLists, generateLibraryAssetCMakeLists, generateProjectCMakeLists, generateTopLevelCMakeLists, generateAppInfoCMake, generateProjInfoCMake, generateGccToolchainCMake, generateIarToolchainCMake, generateLlvmToolchainCMake, generateArmToolchainCMake, generateBspCMakeInclude, generateCMakePresetsFile, generateVSCodeLaunchJson, generateVSCodeTasksJson, generateVSCodeSettingsJson, AssetSubdirectory, loadDependsDB, resolveIncludeDirs, resolveAssetExports, resolveAssetInternals, hasActiveSources, readProjectDefinesByConfig, readProjectDefinesForConfig, fixDefineFilePaths, readProjectFlagsByConfig, readProjectFlagsForConfig, mergeProjectFlagsByConfig, remapFlagPaths, ProjectFlagsByConfig, ProjectFlagsByToolchain, DependsEntry, ConditionalIncludeDir, processSignCombineJson, SignCombineInfo } from './cmakeutil';
 import { MTBUtils } from './mtbenv/misc/mtbutils';
 import * as winston from 'winston';
 import * as fs from 'fs';
@@ -461,6 +461,22 @@ export class MTB5Converter {
             }) ;
             const debugDefines   = filterDefines(debugDefinesRaw) ;
             const releaseDefines = filterDefines(releaseDefinesRaw) ;
+
+            // Remap linker flag/lib paths that reference files inside source asset
+            // directories (e.g. ../../mtb_shared/wifi-host-driver/...) to the
+            // corresponding path under assets/<name>/ in the cmake project layout.
+            const assetPathMap = new Map<string, string>() ;
+            for (const req of project.assetsRequests) {
+                if (req.isBSP()) continue ;
+                const aName = req.name() ;
+                if (aName === 'device-db') continue ;
+                const srcAssetPath = req.fullPath(dirList) ;
+                assetPathMap.set(
+                    path.normalize(srcAssetPath),
+                    '${CMAKE_CURRENT_SOURCE_DIR}/../assets/' + aName
+                ) ;
+            }
+            remapFlagPaths(flagsByToolchain, srcProjDir, assetPathMap) ;
 
             generateProjectCMakeLists(destProjDir, projName, sources, assetSubs, projectIncludeDirs, bspName, components, flagsByToolchain, debugDefines, releaseDefines, dependsDB) ;
             this.logger_.info(`Generated CMakeLists.txt for project '${projName}'`) ;
