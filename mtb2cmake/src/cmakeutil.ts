@@ -1266,13 +1266,17 @@ export function conditionKey(conditions: DirCondition[]) : string {
 
 //
 // Convert a set of conditions into a CMake if() expression.
-// COMPONENT_*, TARGET_*, and CONFIG_* become variable-truthiness checks.
+// COMPONENT_* and TARGET_* become variable-truthiness checks.
+// CONFIG_* becomes a CMAKE_BUILD_TYPE string comparison (e.g. CONFIG_Debug → CMAKE_BUILD_TYPE STREQUAL "Debug").
 // TOOLCHAIN_* becomes a MTBTOOLCHAIN string comparison.
 //
 export function conditionToCMake(conditions: DirCondition[]) : string {
     const parts = conditions.map(c => {
         if (c.type === 'toolchain') {
             return `MTBTOOLCHAIN STREQUAL "${c.value}"` ;
+        }
+        if (c.type === 'config') {
+            return `CMAKE_BUILD_TYPE STREQUAL "${c.value}"` ;
         }
         return c.dirName.replace(/-/g, '_') ;
     }) ;

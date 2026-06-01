@@ -880,7 +880,9 @@
     {
         "name" : "emusb-device",
         "exports" : [
-            "USBD"
+            "USBD",
+            "USBD/COMPONENT_USBD_BASE/COMPONENT_PSE84/CONFIG_Debug",
+            "USBD/COMPONENT_USBD_BASE/COMPONENT_PSE84/CONFIG_Release"
         ],
         "imports" : [
             "core-lib",
