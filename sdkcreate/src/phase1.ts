@@ -4,7 +4,8 @@ import { run } from './runner';
 import { StatusTracker } from './status';
 
 export interface Phase1Options {
-    bsps: string[];
+    bsps?: string[];
+    pairs?: BspAppPair[];
     mtbdir: string;
     projectCreator: string;
     logDir: string;
@@ -52,24 +53,32 @@ function applyLimit(apps: string[], limit: number | undefined, include: string[]
 export async function runPhase1(opts: Phase1Options): Promise<BspAppPair[]> {
     console.log('\nPhase 1: Creating MTB code examples');
 
-    // Enumerate all BSP/app pairs first
-    const pairs: BspAppPair[] = [];
-    for (const bsp of opts.bsps) {
-        console.log(`  Listing apps for BSP: ${bsp}`);
-        const result = await run(opts.projectCreator, ['--list-apps', bsp]);
-        const apps = parseAppList(result.stdout);
-        if (apps.length === 0) {
-            console.log(`  WARNING: No apps found for BSP ${bsp} (exit code ${result.exitCode})`);
-        } else {
-            console.log(`  Found ${apps.length} app(s) for ${bsp}`);
-        }
-        const selectedApps = applyLimit(apps, opts.limit, opts.include);
-        if (opts.limit !== undefined && selectedApps.length < apps.length) {
-            console.log(`  Limiting to ${selectedApps.length} app(s) for ${bsp} (limit=${opts.limit})`);
-        }
-        for (const app of selectedApps) {
-            pairs.push({ bsp, app });
+    // Use pre-determined pairs (e.g. retry mode) or enumerate from BSPs
+    let pairs: BspAppPair[];
+    if (opts.pairs) {
+        pairs = opts.pairs;
+        for (const { bsp, app } of pairs) {
             opts.status.updateEntry(bsp, app, { create_status: 'pending' });
+        }
+    } else {
+        pairs = [];
+        for (const bsp of (opts.bsps ?? [])) {
+            console.log(`  Listing apps for BSP: ${bsp}`);
+            const result = await run(opts.projectCreator, ['--list-apps', bsp]);
+            const apps = parseAppList(result.stdout);
+            if (apps.length === 0) {
+                console.log(`  WARNING: No apps found for BSP ${bsp} (exit code ${result.exitCode})`);
+            } else {
+                console.log(`  Found ${apps.length} app(s) for ${bsp}`);
+            }
+            const selectedApps = applyLimit(apps, opts.limit, opts.include);
+            if (opts.limit !== undefined && selectedApps.length < apps.length) {
+                console.log(`  Limiting to ${selectedApps.length} app(s) for ${bsp} (limit=${opts.limit})`);
+            }
+            for (const app of selectedApps) {
+                pairs.push({ bsp, app });
+                opts.status.updateEntry(bsp, app, { create_status: 'pending' });
+            }
         }
     }
 

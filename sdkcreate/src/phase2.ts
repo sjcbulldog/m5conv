@@ -14,6 +14,7 @@ export interface Phase2Options {
     status: StatusTracker;
     skip?: Set<number>;
     targets?: string[];
+    cmakeOnly?: boolean;
 }
 
 export async function runPhase2(opts: Phase2Options): Promise<BspAppPair[]> {
@@ -43,7 +44,7 @@ export async function runPhase2(opts: Phase2Options): Promise<BspAppPair[]> {
             '--source', srcDir,
             '--dest',   destDir,
             '--depends', opts.depends,
-            '--force',
+            ...(opts.cmakeOnly ? ['--cmake-only'] : ['--force']),
         ];
         if (opts.targets && opts.targets.length > 0) {
             mtb2cmakeArgs.push('--target', opts.targets.join(','));

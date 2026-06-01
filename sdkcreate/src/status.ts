@@ -56,6 +56,15 @@ export class StatusTracker {
         return this.entries_;
     }
 
+    public static load(file: string): StatusTracker {
+        const tracker = new StatusTracker(file);
+        if (fs.existsSync(file)) {
+            const raw = fs.readFileSync(file, 'utf-8');
+            tracker.entries_ = JSON.parse(raw) as StatusEntry[];
+        }
+        return tracker;
+    }
+
     private save(): void {
         const maxRetry = 5;
         for (let i = 0; i < maxRetry; i++) {

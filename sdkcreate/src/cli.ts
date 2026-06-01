@@ -1,5 +1,5 @@
 export interface CliArgs {
-    bsps: string[];
+    bsps?: string[];
     mtbdir: string;
     cmakedir: string;
     status: string;
@@ -11,6 +11,8 @@ export interface CliArgs {
     include?: string[];
     skip?: number[];
     targets?: string[];
+    cmakeOnly?: boolean;
+    runAgain?: boolean;
 }
 
 function printUsage(): void {
@@ -34,6 +36,9 @@ Optional options:
                               the phase output directory already exists
   --target=T1,T2,...          Comma-separated toolchain targets passed to mtb2cmake
                               (iar, gcc, llvm, arm; default: all)
+  --cmake-only                Pass --cmake-only (not --force) to mtb2cmake
+  --run-again                 Read the status file and retry only failed steps;
+                              if ninja_build failed, also re-runs phase 2
 
   --help                      Show this help message
 `);
@@ -105,6 +110,10 @@ export function parseArgs(argv: string[]): CliArgs {
                 process.exit(1);
             }
             result.targets = words;
+        } else if (arg === '--cmake-only') {
+            result.cmakeOnly = true;
+        } else if (arg === '--run-again') {
+            result.runAgain = true;
         } else {
             console.error(`Unknown argument: ${arg}`);
             printUsage();
@@ -112,7 +121,9 @@ export function parseArgs(argv: string[]): CliArgs {
         }
     }
 
-    const required: (keyof CliArgs)[] = ['bsps', 'mtbdir', 'cmakedir', 'status', 'logs', 'projectCreator', 'mtb2cmake', 'depends'];
+    const required: (keyof CliArgs)[] = result.runAgain
+        ? ['mtbdir', 'cmakedir', 'status', 'logs', 'projectCreator', 'mtb2cmake', 'depends']
+        : ['bsps', 'mtbdir', 'cmakedir', 'status', 'logs', 'projectCreator', 'mtb2cmake', 'depends'];
     const argNames: Partial<Record<keyof CliArgs, string>> = {
         bsps: '--bsps',
         mtbdir: '--mtbdir',
