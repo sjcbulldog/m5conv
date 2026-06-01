@@ -14,7 +14,7 @@
                 "--force",
                 "--depends", "${workspaceFolder}/depends.json",
                 "--target", "gcc",
-                "--source", "c:/sdk/mtb/${input:mtbProjectName}",
+                "--source", "c:/sdk/mtb/KIT_PSE84_EVAL_EPC2/${input:mtbProjectName}",
                 "--dest", "c:/sdk/mtb5/${input:mtbProjectName}",
             ]
         }

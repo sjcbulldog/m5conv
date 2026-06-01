@@ -175,6 +175,7 @@ export class MTB5Converter {
 
         const destAssetsDir = path.join(this.dest_, 'assets') ;
         const copiedAssets = new Set<string>() ;
+        let wifiHostDriverDestPath: string | null = null ;
 
         for (const project of appInfo.projects) {
             const dirList = project.dirList ;
@@ -258,14 +259,28 @@ export class MTB5Converter {
                 }
 
                 // Special case: wifi-host-driver requires the companion wifi-resources
-                // asset to be present and its CMakeLists.txt to include conditional
-                // resource defines (CLM_IMAGE_NAME, FW_IMAGE_NAME, NVRAM_IMAGE_NAME).
+                // asset to be present. Track the dest path so we can append resource
+                // defines after ALL assets have been copied/processed (wifi-resources
+                // may appear later in the asset list than wifi-host-driver).
                 if (assetName === 'wifi-host-driver') {
+                    wifiHostDriverDestPath = destPath ;
                     const wifiResourcesDestPath = path.join(destAssetsDir, 'wifi-resources') ;
 
                     if (!this.cmakeOnly && !copiedAssets.has('wifi-resources') && !fs.existsSync(wifiResourcesDestPath)) {
-                        const wifiResourcesSrcPath = path.join(path.dirname(srcPath), 'wifi-resources') ;
-                        if (fs.existsSync(wifiResourcesSrcPath)) {
+                        // wifi-resources was not yet processed. Try to find it as a sibling
+                        // in the same shared directory (go up two levels: version → asset → shared,
+                        // then look for wifi-resources/release-*).
+                        const sharedDir = path.dirname(path.dirname(srcPath)) ;
+                        const wifiResBaseDir = path.join(sharedDir, 'wifi-resources') ;
+                        let wifiResourcesSrcPath : string | undefined ;
+                        if (fs.existsSync(wifiResBaseDir)) {
+                            const entries = fs.readdirSync(wifiResBaseDir) ;
+                            const versionDir = entries.find(e => e.startsWith('release-')) ;
+                            if (versionDir) {
+                                wifiResourcesSrcPath = path.join(wifiResBaseDir, versionDir) ;
+                            }
+                        }
+                        if (wifiResourcesSrcPath && fs.existsSync(wifiResourcesSrcPath)) {
                             this.logger_.info(`Copying companion asset 'wifi-resources' for wifi-host-driver`) ;
                             const resSkipped = await copyDirTolerant(wifiResourcesSrcPath, wifiResourcesDestPath) ;
                             warnSkippedFiles(this.logger_, "asset 'wifi-resources'", resSkipped) ;
@@ -278,13 +293,8 @@ export class MTB5Converter {
                                 }
                             }
                         } else {
-                            this.logger_.warn(`Companion asset 'wifi-resources' not found at '${wifiResourcesSrcPath}' - skipping resource defines`) ;
+                            this.logger_.warn(`Companion asset 'wifi-resources' not found near '${srcPath}' - resource defines will be omitted`) ;
                         }
-                    }
-
-                    if (fs.existsSync(wifiResourcesDestPath)) {
-                        generateWifiHostDriverResourceDefines(destPath, wifiResourcesDestPath) ;
-                        this.logger_.info(`Appended WiFi resource defines to wifi-host-driver CMakeLists.txt`) ;
                     }
                 }
 
@@ -296,6 +306,18 @@ export class MTB5Converter {
             this.logger_.info('No assets found to copy') ;
         } else {
             this.logger_.info(`Copied ${copiedAssets.size} asset(s) to '${destAssetsDir}'`) ;
+        }
+
+        // Post-processing: append wifi-host-driver resource defines after ALL assets
+        // are in the destination (wifi-resources may have been copied after wifi-host-driver).
+        if (wifiHostDriverDestPath) {
+            const wifiResourcesDestPath = path.join(destAssetsDir, 'wifi-resources') ;
+            if (fs.existsSync(wifiResourcesDestPath)) {
+                generateWifiHostDriverResourceDefines(wifiHostDriverDestPath, wifiResourcesDestPath) ;
+                this.logger_.info(`Appended WiFi resource defines to wifi-host-driver CMakeLists.txt`) ;
+            } else {
+                this.logger_.warn(`wifi-resources not found in destination - WiFi resource defines omitted from wifi-host-driver`) ;
+            }
         }
     }
 
@@ -483,12 +505,19 @@ export class MTB5Converter {
                 this.logger_.info(`  defines files: none found under ${path.join(srcProjDir, 'build')}`) ;
             }
             // Exclude any COMPONENT_* defines already handled by the components mechanism.
+            // Also exclude wifi image defines that are emitted conditionally by the
+            // wifi-host-driver CMakeLists.txt and must not be duplicated at project level.
             const componentDefineNames = new Set(
                 components.map(c => `COMPONENT_${c.replace(/-/g, '_')}`)
             ) ;
+            const wifiImageDefines = new Set([
+                'CLM_IMAGE_NAME', 'CLM_IMAGE_SIZE',
+                'FW_IMAGE_NAME',  'FW_IMAGE_SIZE',
+                'NVRAM_IMAGE_NAME', 'NVRAM_IMAGE_SIZE',
+            ]) ;
             const filterDefines = (defs: string[]) => defs.filter(d => {
                 const name = d.split('=')[0] ;
-                return !name.startsWith('COMPONENT_') && !componentDefineNames.has(name) ;
+                return !name.startsWith('COMPONENT_') && !componentDefineNames.has(name) && !wifiImageDefines.has(name) ;
             }) ;
             const debugDefines   = filterDefines(debugDefinesRaw) ;
             const releaseDefines = filterDefines(releaseDefinesRaw) ;

@@ -3388,42 +3388,67 @@ export function generateWifiHostDriverResourceDefines(
         lines.push(`if(COMPONENT_WIFI6 AND ${chipComp} AND COMPONENT_SM AND ${boardCond})`) ;
 
         if (!hasSense) {
-            // Simple case: single add_compile_definitions block
+            // Simple case: single add_compile_definitions block.
+            // Compute file sizes at cmake configure time with file(SIZE ...).
+            if (clmRelPath) {
+                lines.push(`    file(SIZE "\${CMAKE_CURRENT_SOURCE_DIR}/../wifi-resources/${clmRelPath}" _wifi_clm_size)`) ;
+            }
+            if (fwEntry?.normal) {
+                lines.push(`    file(SIZE "\${CMAKE_CURRENT_SOURCE_DIR}/${fwEntry.normal}" _wifi_fw_size)`) ;
+            }
+            if (nvramRelPath) {
+                lines.push(`    file(SIZE "\${CMAKE_CURRENT_SOURCE_DIR}/../wifi-resources/${nvramRelPath}" _wifi_nvram_size)`) ;
+            }
             lines.push('    add_compile_definitions(') ;
             if (clmRelPath) {
                 lines.push(`        CLM_IMAGE_NAME="\${CMAKE_CURRENT_SOURCE_DIR}/../wifi-resources/${clmRelPath}"`) ;
+                lines.push(`        CLM_IMAGE_SIZE=\${_wifi_clm_size}`) ;
             }
             if (fwEntry?.normal) {
                 lines.push(`        FW_IMAGE_NAME="\${CMAKE_CURRENT_SOURCE_DIR}/${fwEntry.normal}"`) ;
+                lines.push(`        FW_IMAGE_SIZE=\${_wifi_fw_size}`) ;
             }
             if (nvramRelPath) {
                 lines.push(`        NVRAM_IMAGE_NAME="\${CMAKE_CURRENT_SOURCE_DIR}/../wifi-resources/${nvramRelPath}"`) ;
+                lines.push(`        NVRAM_IMAGE_SIZE=\${_wifi_nvram_size}`) ;
             }
             lines.push('    )') ;
         } else {
             // Chip has a WLANSENSE sense firmware variant.
-            // CLM and NVRAM are shared; only FW_IMAGE_NAME differs by mode.
+            // CLM and NVRAM are shared; only FW_IMAGE_NAME/FW_IMAGE_SIZE differ by mode.
             if (clmRelPath || nvramRelPath) {
+                if (clmRelPath) {
+                    lines.push(`    file(SIZE "\${CMAKE_CURRENT_SOURCE_DIR}/../wifi-resources/${clmRelPath}" _wifi_clm_size)`) ;
+                }
+                if (nvramRelPath) {
+                    lines.push(`    file(SIZE "\${CMAKE_CURRENT_SOURCE_DIR}/../wifi-resources/${nvramRelPath}" _wifi_nvram_size)`) ;
+                }
                 lines.push('    add_compile_definitions(') ;
                 if (clmRelPath) {
                     lines.push(`        CLM_IMAGE_NAME="\${CMAKE_CURRENT_SOURCE_DIR}/../wifi-resources/${clmRelPath}"`) ;
+                    lines.push(`        CLM_IMAGE_SIZE=\${_wifi_clm_size}`) ;
                 }
                 if (nvramRelPath) {
                     lines.push(`        NVRAM_IMAGE_NAME="\${CMAKE_CURRENT_SOURCE_DIR}/../wifi-resources/${nvramRelPath}"`) ;
+                    lines.push(`        NVRAM_IMAGE_SIZE=\${_wifi_nvram_size}`) ;
                 }
                 lines.push('    )') ;
             }
             if (fwEntry.sense || fwEntry.normal) {
                 lines.push('    if(COMPONENT_WLANSENSE)') ;
                 if (fwEntry.sense) {
+                    lines.push(`        file(SIZE "\${CMAKE_CURRENT_SOURCE_DIR}/${fwEntry.sense}" _wifi_fw_size)`) ;
                     lines.push('        add_compile_definitions(') ;
                     lines.push(`            FW_IMAGE_NAME="\${CMAKE_CURRENT_SOURCE_DIR}/${fwEntry.sense}"`) ;
+                    lines.push(`            FW_IMAGE_SIZE=\${_wifi_fw_size}`) ;
                     lines.push('        )') ;
                 }
                 if (fwEntry.normal) {
                     lines.push('    else()') ;
+                    lines.push(`        file(SIZE "\${CMAKE_CURRENT_SOURCE_DIR}/${fwEntry.normal}" _wifi_fw_size)`) ;
                     lines.push('        add_compile_definitions(') ;
                     lines.push(`            FW_IMAGE_NAME="\${CMAKE_CURRENT_SOURCE_DIR}/${fwEntry.normal}"`) ;
+                    lines.push(`            FW_IMAGE_SIZE=\${_wifi_fw_size}`) ;
                     lines.push('        )') ;
                 }
                 lines.push('    endif()') ;
