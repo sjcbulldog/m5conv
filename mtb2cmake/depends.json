@@ -1,0 +1,1960 @@
+// depends.json — ModusToolbox asset dependency database for mtb2cmake
+//
+// This file describes the include-directory export/import relationships between
+// ModusToolbox middleware and BSP assets so that the converter can wire up
+// CMake target_include_directories() calls without needing to run the
+// ModusToolbox build system.
+//
+// Format: JSON array of asset entries.  Comments (// and /* */) are allowed.
+//
+// Each entry has the following fields:
+//
+//   "name"     (string, required)
+//              The asset's library name, matching the directory name under
+//              the libs/ or shared/libs/ tree (e.g. "core-lib", "freertos").
+//
+//   "exports"  (string[], required)
+//              Subdirectory paths (relative to the asset root) that are added
+//              to the PUBLIC include path for any target that imports this asset.
+//
+//   "imports"  (array, optional)
+//              Other assets whose exported include directories this asset needs.
+//              Each element is either:
+//                - a plain string  — the name of another asset in this file, or
+//                  one of the special tokens:
+//                    "***BSP***"                  the board support package root
+//                    "***BSP***/config/GeneratedSource"  BSP generated headers
+//                    "***PROJECT***"              the application project root
+//                - an object { "component": "<COMPONENT_FLAG>", "name": "<asset>" }
+//                  which makes the import conditional on that COMPONENT_* define.
+//
+//   "includes" (string[], optional)
+//              Extra subdirectory paths added to the PRIVATE include path of
+//              this asset only (not propagated to importers).
+//
+//   "internal" (string[], optional)
+//              Source subdirectories that contain toolchain-specific source
+//              files (e.g. "source/TOOLCHAIN_GCC_ARM").  The converter adds
+//              these to the asset's source glob list.
+//
+//   "excludes" (string[], optional)
+//              Subdirectory or file paths to exclude from source globbing
+//              (e.g. test harnesses, documentation generator sources).
+//
+[
+    {
+        "name" : "async-transfer",
+        "imports" : [
+            "core-lib",
+            "mtb-dsl-pse8xxgp",
+            "cmsis",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ],
+        "exports" : [
+            "include"
+        ]
+    },
+    {
+        "name" : "core-lib",
+        "exports" : [
+            "include"
+        ],
+        "imports" : []
+    },
+    {
+        "name" : "cmsis",
+        "exports" : [
+            "Core/Include",
+            "Core/Include/m-profile"
+        ],
+        "imports" : []
+    },
+    {
+        "name" : "clib-support",
+        "exports" : [
+            "include",
+            "source/TOOLCHAIN_IAR",
+            "source/TOOLCHAIN_ARM"
+        ],
+        "internal" : [
+            "source/TOOLCHAIN_ARM",
+            "source/TOOLCHAIN_GCC_ARM",
+            "source/TOOLCHAIN_IAR",
+            "source/TOOLCHAIN_LLVM_ARM"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "abstraction-rtos",
+            "freertos",
+            "mtb-srf",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "mtb-dsl-pse8xxgp",
+        "exports" : [
+            "pdl/drivers/include",
+            "pdl/drivers/third_party/COMPONENT_GFXSS",
+            "pdl/drivers/third_party/COMPONENT_GFXSS/vsi/dcnano8000/include",            
+            "pdl/drivers/third_party/COMPONENT_GFXSS/vsi/dcnano8000/DCUser",                  
+            "pdl/drivers/third_party/COMPONENT_GFXSS/vsi/dcnano8000/DCKernel",               
+            "pdl/drivers/third_party/COMPONENT_GFXSS/vsi/dcnano8000/DCKernel/hardware/8000Nano",   
+            "pdl/drivers/third_party/COMPONENT_GFXSS/vsi/gcnano/inc/",                        
+            "pdl/devices/include",
+            "pdl/devices/include/ip",
+            "device-utils/syspm/include",
+            "hal/include"
+        ],
+        "imports" : [
+            "clib-support",
+            "async-transfer",
+            "core-lib",
+            "cmsis",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ],
+        "includes" : [
+            "pdl/drivers/third_party/ethernet/include",
+            "nnkernel/COMPONENT_CM33/include",
+            "pdl/drivers/third_party/COMPONENT_GFXSS/vsi/dcnano8000/DCUser/rtos",
+            "pdl/drivers/third_party/COMPONENT_GFXSS/vsi/dcnano8000/DCKernel/rtos",
+            "pdl/drivers/third_party/COMPONENT_GFXSS/vsi/gcnano/VGLiteKernel/rtos",
+            "pdl/drivers/third_party/COMPONENT_GFXSS/vsi/gcnano/VGLiteKernel"
+        ]
+    },
+    {
+        "name" : "abstraction-rtos",
+        "exports" : [
+            "include",
+            "include/COMPONENT_FREERTOS",
+            "include/COMPONENT_THREADX",
+            "include/COMPONENT_RTX"
+        ],
+        "imports" : [
+            "clib-support",
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "async-transfer",
+            "mtb-ipc",
+            {
+                "component" : "FREERTOS",
+                "name" : "freertos"
+            },
+            "btstack-integration",
+            "***BSP***",                
+            "***BSP***/config/GeneratedSource",
+            "***BSP***/bluetooth",
+            "***PROJECT***"
+        ],
+        "includes" : [
+            "include",
+            "include/COMPONENT_FREERTOS",
+            "include/COMPONENT_THREADX",
+            "include/COMPONENT_RTX"
+        ]
+    },
+    {
+        "name" : "freertos",
+        "exports" : [
+            "Source/include",
+            "Source/portable/COMPONENT_CM0",
+            "Source/portable/COMPONENT_CM33",
+            "Source/portable/COMPONENT_CM4",
+            "Source/portable/COMPONENT_CM7",
+            "Source/portable/COMPONENT_CM0/TOOLCHAIN_GCC_ARM",
+            "Source/portable/COMPONENT_CM4/TOOLCHAIN_GCC_ARM",
+            "Source/portable/COMPONENT_CM7/TOOLCHAIN_GCC_ARM",           
+            "Source/portable/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/COMPONENT_FREERTOS_NTZ",
+            "Source/portable/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/COMPONENT_FREERTOS_TZ",
+            "Source/portable/COMPONENT_CM55/TOOLCHAIN_GCC_ARM",
+            "Source/portable/COMPONENT_CM33/TOOLCHAIN_LLVM_ARM/COMPONENT_FREERTOS_NTZ",
+            "Source/portable/COMPONENT_CM33/TOOLCHAIN_LLVM_ARM/COMPONENT_FREERTOS_TZ",
+            "Source/portable/COMPONENT_CM55/TOOLCHAIN_LLVM_ARM",            
+            "Source/portable/COMPONENT_CM0/TOOLCHAIN_IAR",
+            "Source/portable/COMPONENT_CM4/TOOLCHAIN_IAR",
+            "Source/portable/COMPONENT_CM7/TOOLCHAIN_IAR",
+            "Source/portable/COMPONENT_CM33/TOOLCHAIN_IAR/COMPONENT_FREERTOS_NTZ",
+            "Source/portable/COMPONENT_CM33/TOOLCHAIN_IAR/COMPONENT_FREERTOS_TZ",
+            "Source/portable/COMPONENT_CM55/TOOLCHAIN_IAR"
+        ],
+        "imports" : [
+            "clib-support",
+            "core-lib",
+            "mtb-dsl-pse8xxgp",            
+            "cmsis",
+            "mtb-srf",
+            "***PROJECT***",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ],
+        "internal" : [
+            "Source/include",
+            "Source/portable/COMPONENT_CM0",
+            "Source/portable/COMPONENT_CM33",
+            "Source/portable/COMPONENT_CM4",
+            "Source/portable/COMPONENT_CM7",
+            "Source/portable/COMPONENT_CM0/TOOLCHAIN_GCC_ARM",
+            "Source/portable/COMPONENT_CM4/TOOLCHAIN_GCC_ARM",
+            "Source/portable/COMPONENT_CM7/TOOLCHAIN_GCC_ARM",           
+            "Source/portable/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/COMPONENT_FREERTOS_NTZ",
+            "Source/portable/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/COMPONENT_FREERTOS_TZ",
+            "Source/portable/COMPONENT_CM55/TOOLCHAIN_GCC_ARM",
+            "Source/portable/COMPONENT_CM0/TOOLCHAIN_IAR",
+            "Source/portable/COMPONENT_CM4/TOOLCHAIN_IAR",
+            "Source/portable/COMPONENT_CM7/TOOLCHAIN_IAR",
+            "Source/portable/COMPONENT_CM33/TOOLCHAIN_IAR/COMPONENT_FREERTOS_NTZ",
+            "Source/portable/COMPONENT_CM33/TOOLCHAIN_IAR/COMPONENT_FREERTOS_TZ",
+            "Source/portable/COMPONENT_CM55/TOOLCHAIN_IAR"
+        ]
+    },
+    {
+        "name" : "mtb-srf",
+        "exports" : [
+            "include",
+            "include/COMPONENT_NON_SECURE_DEVICE",
+            "include/COMPONENT_NON_SECURE_DEVICE/COMPONENT_MW_MTB_IPC"
+        ],
+        "imports" : [
+            "clib-support",            
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",            
+            "async-transfer",
+            "mtb-ipc",
+            "abstraction-rtos",
+            "freertos",
+            "***PROJECT***",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ]
+    },
+    {
+        "name" : "mtb-ipc",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "clib-support",
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "async-transfer",
+            "abstraction-rtos",
+            "freertos",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "se-rt-services-utils",
+        "exports" : [
+            "."
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "***BSP***"
+        ]
+    },
+    {
+        "name" : "display-dsi-waveshare-4-3-lcd",
+        "exports" : [
+            ".",
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "mtb-dsl-pse8xxgp",
+            "cmsis",
+            "mtb-srf",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"            
+        ]
+    },
+    {
+        "name" : "display-dsi-waveshare-7-0-lcd-c",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "mtb-dsl-pse8xxgp",
+            "cmsis",
+            "mtb-srf",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"            
+        ]
+    },
+    {
+        "name" : "display-tft-ek79007ad3",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "mtb-dsl-pse8xxgp",
+            "cmsis",
+            "mtb-srf",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"            
+        ]
+    },
+    {
+        "name" : "retarget-io",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "abstraction-rtos",
+            "core-lib",
+            "cmsis",
+            "freertos",            
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "lvgl",
+        "exports" : [
+            ".",
+            "demos/music/assets",
+            "src/draw",
+            "src/draw/sw",
+            "src/draw/vg_lite",
+            "src/indev",
+            "src/core"
+        ],
+        "internal" : [
+            "demos/music"
+        ],
+        "imports" : [
+            "clib-support",
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "touch-ctp-ft5406",
+        "exports" : [
+            "include",
+            "."
+        ],
+        "imports" : [
+            "core-lib",
+            "mtb-dsl-pse8xxgp",
+            "cmsis",
+            "mtb-srf",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "ifx-mcuboot-pse84.mtb",
+        "exports" : [
+            "include",
+            "bootutil/include"
+        ],
+        "imports" : [
+        ]
+    },
+    {
+        "name" : "ifx-mbedtls",
+        "exports" : [
+            "include",
+            "include/mbedtls",
+            "library"
+        ],
+        "imports" : [
+            "wifi-core-freertos-lwip-mbedtls",
+            "mtb-dsl-pse8xxgp",
+            "core-lib",
+            "cmsis",
+            "mtb-srf",
+            "mtb-ipc",
+            "cy-mbedtls-acceleration",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ]
+    },
+    {
+        "name" : "connectivity-utilities",
+        "exports" : [
+            "include",
+            ".",
+            "network",
+            "cy_log"
+        ],
+        "imports" : [
+            "core-lib",
+            "abstraction-rtos",
+            "core-lib",
+            "cmsis",
+            "freertos",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "async-transfer",
+            "wifi-host-driver",
+            "lwip",
+            "lwip-freertos-integration",
+            "lwip-network-interface-integration",
+            "wifi-core-freertos-lwip-mbedtls",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",            
+            "***PROJECT***"            
+        ]
+    },
+    {
+        "name" : "cy-mbedtls-acceleration",
+        "exports" : [
+            ".",
+            "include",
+            "mbedtls_PSA/mbedtls_psa_MXCrypto",
+            "mbedtls_MXCRYPTO"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "ifx-mbedtls",
+            "wifi-core-freertos-lwip-mbedtls",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ]
+    },
+    {
+        "name" : "lwip",
+        "exports" : [
+            "src/include",
+            "src/include/netif"
+        ],
+        "excludes" : [
+            "doc",
+            "src/apps/http/makefsdata",
+                "src/apps/http/fsdata.c",
+                "test"
+            ],
+        "imports" : [
+            "lwip-freertos-integration",
+            "wifi-core-freertos-lwip-mbedtls",
+            "wifi-host-driver",
+            "mtb-dsl-pse8xxgp",
+            "core-lib",
+            "cmsis",
+            "mtb-srf",
+            "mtb-ipc",
+            "ifx-mbedtls",
+            "cy-mbedtls-acceleration",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ]
+    },
+    {
+        "name" : "wifi-core-freertos-lwip-mbedtls",
+        "exports" : [
+            ".",
+            "include",
+            "configs"
+        ],
+        "imports" : [
+        ]
+    },
+    {
+        "name" : "wifi-host-driver",
+        "exports" : [
+            "WHD/COMPONENT_WIFI6/inc",
+            "WHD/COMPONENT_WIFI6/src/include"
+        ],
+        "internal" : [
+            "External/rtos",
+            "WHD/COMPONENT_WIFI6/resources/firmware",
+            "WHD/COMPONENT_WIFI6/resources/resource_imp",
+            "WHD/COMPONENT_WIFI6/resources",
+            "WHD/COMPONENT_WIFI6/src",
+            "."
+        ],
+        "imports" : [
+            "mtb-dsl-pse8xxgp",
+            "core-lib",
+            "abstraction-rtos",
+            "freertos",
+            "cmsis",
+            "mtb-ipc",
+            "mtb-srf",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ]
+    },
+    {
+        "name" : "whd-bsp-integration",
+        "exports" : [
+            "."
+        ],
+        "imports" : [
+            "wifi-host-driver",
+            "wifi-core-freertos-lwip-mbedtls",
+            "core-lib",
+            "mtb-dsl-pse8xxgp",
+            "cmsis",
+            "mtb-srf",
+            "mtb-ipc",
+            "async-transfer",
+            "freertos",
+            "lwip",
+            "lwip-freertos-integration",
+            "abstraction-rtos",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ]
+    },
+    {
+        "name" : "lwip-freertos-integration",
+        "exports" : [
+            "."
+        ],
+        "imports" : [
+            "lwip",
+            "wifi-core-freertos-lwip-mbedtls",
+            "wifi-host-driver",
+            "mtb-dsl-pse8xxgp",
+            "core-lib",
+            "cmsis",
+            "mtb-srf",
+            "mtb-ipc",
+            "ifx-mbedtls",
+            "cy-mbedtls-acceleration",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ]
+    },
+    {
+        "name" : "lwip-network-interface-integration",
+        "exports" : [
+            "include",
+            "source"
+        ],
+        "imports" : [
+            "lwip",
+            "lwip-freertos-integration",
+            "connectivity-utilities",
+            "whd-bsp-integration",
+            "wifi-core-freertos-lwip-mbedtls",
+            "wifi-host-driver",
+            "mtb-dsl-pse8xxgp",
+            "core-lib",
+            "cmsis",
+            "mtb-srf",
+            "mtb-ipc",
+            "ifx-mbedtls",
+            "cy-mbedtls-acceleration",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ]
+    },
+    {
+        "name" : "secure-sockets",
+        "exports" : [
+            "include"
+        ],
+        "internal" : [
+            "source/COMPONENT_MBEDTLS/include",
+            "source"
+        ],
+        "imports" : [
+            "connectivity-utilities",
+            "lwip",
+            "lwip-freertos-integration",
+            "lwip-network-interface-integration",
+            "wifi-core-freertos-lwip-mbedtls",
+            "wifi-host-driver",
+            "whd-bsp-integration",
+            "ifx-mbedtls",
+            "cy-mbedtls-acceleration",
+            "abstraction-rtos",
+            "freertos",
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "mtb-ipc",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ]
+    },
+    {
+        "name" : "wifi-connection-manager",
+        "exports" : [
+            "include",
+            "."
+        ],
+        "internal" : [
+            "source/COMPONENT_55500"
+        ],
+        "imports" : [
+            "core-lib",
+            "abstraction-rtos",
+            "cmsis",
+            "freertos",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "mtb-ipc",
+            "async-transfer",
+            "wifi-host-driver",
+            "lwip",
+            "lwip-freertos-integration",
+            "lwip-network-interface-integration",
+            "wifi-core-freertos-lwip-mbedtls",
+            "connectivity-utilities",
+            "whd-bsp-integration",
+            "ifx-mbedtls",
+            "cy-mbedtls-acceleration",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "wpa3-external-supplicant",
+        "exports" : [
+            "include"
+        ],
+        "internal" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "abstraction-rtos",
+            "cmsis",
+            "freertos",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "mtb-ipc",
+            "async-transfer",
+            "wifi-host-driver",
+            "wifi-connection-manager",
+            "connectivity-utilities",
+            "wifi-core-freertos-lwip-mbedtls",
+            "ifx-mbedtls",
+            "cy-mbedtls-acceleration",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ]
+    },
+    {
+        "name" : "http-client",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "connectivity-utilities",
+            "lwip",
+            "lwip-freertos-integration",
+            "lwip-network-interface-integration",
+            "wifi-core-freertos-lwip-mbedtls",
+            "wifi-host-driver",
+            "whd-bsp-integration",
+            "ifx-mbedtls",
+            "cy-mbedtls-acceleration",
+            "abstraction-rtos",
+            "freertos",
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "mtb-ipc",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ]
+    },
+    {
+        "name": "mqtt",
+        "exports": [
+            "include"
+        ],
+        "imports": [
+            "connectivity-utilities",
+            "lwip",
+            "lwip-freertos-integration",
+            "lwip-network-interface-integration",
+            "wifi-core-freertos-lwip-mbedtls",
+            "wifi-host-driver",
+            "whd-bsp-integration",
+            "ifx-mbedtls",
+            "cy-mbedtls-acceleration",
+            "abstraction-rtos",
+            "freertos",
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "mtb-ipc",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ]
+    },
+    {
+        "name" : "aws-iot-devcie-sdk-port",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "connectivity-utilities",
+            "lwip",
+            "lwip-freertos-integration",
+            "lwip-network-interface-integration",
+            "wifi-core-freertos-lwip-mbedtls",
+            "wifi-host-driver",
+            "whd-bsp-integration",
+            "ifx-mbedtls",
+            "cy-mbedtls-acceleration",
+            "abstraction-rtos",
+            "freertos",
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "mtb-ipc",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ],
+        "internal" : [
+            "libraries/aws/ota-for-aws-iot-embedded-sdk/source/include"
+        ]
+    },
+    {
+        "name" : "avnet-iotc-mtb-sdk",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "connectivity-utilities",
+            "lwip",
+            "lwip-freertos-integration",
+            "lwip-network-interface-integration",
+            "wifi-core-freertos-lwip-mbedtls",
+            "wifi-host-driver",
+            "whd-bsp-integration",
+            "ifx-mbedtls",
+            "cy-mbedtls-acceleration",
+            "abstraction-rtos",
+            "freertos",
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "mtb-ipc",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource"
+        ],
+        "internal" : [
+            "lib/iotc-c-lib/lib/cJSON",
+            "lib/iotc-c-lib/core/include"
+        ]
+    },
+    {
+        "name" : "btstack-integration",
+        "exports" : [
+            "include",
+            "COMPONENT_BLESS-IPC/include",
+            "COMPONENT_BTSS-IPC/include",
+            "COMPONENT_HCI-UART/include",
+            "COMPONENT_HCI-UART/common"
+        ],
+        "imports" : [
+            "btstack",
+            "abstraction-rtos",
+            "freertos",            
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "async-transfer",
+            "mtb-dsl-pse8xxgp",
+            "***BSP***",
+            "***BSP***/bluetooth",
+            "***BSP***/config/GeneratedSource"
+        ],
+        "internal" : [
+            "COMPONENT_BLESS-IPC/platform_hal_wrappers",
+            "COMPONENT_BTSS-IPC/platform_hal_wrappers",
+            "COMPONENT_HCI-UART/platform_hal_wrappers",
+            "COMPONENT_HCI-UART/common"
+        ]
+    },
+    {
+        "name" : "btstack",
+        "exports" : [
+            "wiced_include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "kv-store",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "block-storage",
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "block-storage",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "emusb-device",
+        "exports" : [
+            "USBD"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "sensor-xensiv-bgt60trxx",
+        "exports" : [
+            "."
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "audio-codec-tlv320dac3100",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "audio-front-end",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "audio-sw-codecs",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "audio-voice-core",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "audiomark",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "aws-iot-device-sdk-embedded-C",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "aws-iot-device-sdk-port",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "azure-c-sdk-port",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "azure-sdk-for-c",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "BMI270_SensorAPI",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "BMM350_SensorAPI",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "bt-audio-profiles",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "bt-fw-ifx-cyw55500a1",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "bt-fw-mur-cyw55513",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "buffer-pool-manager",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "camera-dvp-ov7675",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "CMSIS-DSP",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "command-console",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "core-make",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "coremark",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "dfu",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "display-amoled-co5300",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "embedded-i2c-sht4x",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "emeeprom",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "emfile",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "emusb-host",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "enterprise-security",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "ethernet-connection-manager",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "ethernet-core-freertos-lwip-mbedtls",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "ethernet-phy-driver",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "freertos-posix",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "http-server",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "ifx-mcuboot-pse84",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "ifx-tf-m-ns",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "ifx-tf-m-pse84epc2",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "littlefs",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "lpa",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "ml-middleware",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "ml-tflite-micro",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "mtb-littlefs",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "ota-bootloader-abstraction",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "ota-update",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "sensor-dsp",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "sensor-humidity-sht4x",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "sensor-motion-bmi270",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "sensor-orientation-bmm350",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "sensor-xensiv-dps3xx",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "serial-memory",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "speech-onset-detection",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "staged-voice-control",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "touch-ctp-ft3268",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "touch-ctp-ft6146-m00",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "touch-ctp-gt911",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "touch-ctp-ili2511",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "virtual-connectivity-manager",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "voice-assistant",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "wifi-resources",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    },
+    {
+        "name" : "xensiv-radar-presence",
+        "exports" : [
+            "include"
+        ],
+        "imports" : [
+            "core-lib",
+            "cmsis",
+            "mtb-dsl-pse8xxgp",
+            "mtb-srf",
+            "abstraction-rtos",
+            "freertos",
+            "async-transfer",
+            "***BSP***",
+            "***BSP***/config/GeneratedSource",
+            "***PROJECT***"
+        ]
+    }
+]

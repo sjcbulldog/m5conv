@@ -1,0 +1,33 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "MTB->CMake",
+            "type": "node",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/index.ts",
+            "preLaunchTask": "npm: build",
+            "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+            "sourceMaps": true,
+            "console": "integratedTerminal",
+            "args": [
+                "--force",
+<<<<<<< HEAD:conv/.vscode/launch.json
+=======
+                "--depends", "${workspaceFolder}/depends.json",
+>>>>>>> 20cfe13e5f4b89fe4e66c0d2be99b2cb30a6a2e2:mtb2cmake/.vscode/launch.json
+                "--target", "gcc",
+                "--source", "${workspaceFolder}/../projects/mtb/edge/${input:mtbProjectName}",
+                "--dest", "${workspaceFolder}/../projects/mtb5/edge/${input:mtbProjectName}",
+            ]
+        }
+    ],
+    "inputs": [
+        {
+            "id" : "mtbProjectName",
+            "type" : "promptString",
+            "description" : "Name of the project to convert",
+            "default" : "graphics"
+        }
+    ]
+}
