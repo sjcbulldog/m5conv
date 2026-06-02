@@ -169,24 +169,33 @@
         "name" : "freertos",
         "exports" : [
             "Source/include",
-            "Source/portable/COMPONENT_CM0",
-            "Source/portable/COMPONENT_CM33",
-            "Source/portable/COMPONENT_CM4",
-            "Source/portable/COMPONENT_CM7",
+
+            "Source/portable/COMPONENT_CM0",            
             "Source/portable/COMPONENT_CM0/TOOLCHAIN_GCC_ARM",
+            "Source/portable/COMPONENT_CM0/TOOLCHAIN_LLVM_ARM",          
+            "Source/portable/COMPONENT_CM0/TOOLCHAIN_IAR",
+
+            "Source/portable/COMPONENT_CM4",            
             "Source/portable/COMPONENT_CM4/TOOLCHAIN_GCC_ARM",
+            "Source/portable/COMPONENT_CM4/TOOLCHAIN_LLVM_ARM",               
+            "Source/portable/COMPONENT_CM4/TOOLCHAIN_IAR",
+
+            "Source/portable/COMPONENT_CM7",              
             "Source/portable/COMPONENT_CM7/TOOLCHAIN_GCC_ARM",           
+            "Source/portable/COMPONENT_CM7/TOOLCHAIN_LLVM_ARM",     
+            "Source/portable/COMPONENT_CM7/TOOLCHAIN_IAR",
+
+            "Source/portable/COMPONENT_CM33",
             "Source/portable/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/COMPONENT_FREERTOS_NTZ",
             "Source/portable/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/COMPONENT_FREERTOS_TZ",
-            "Source/portable/COMPONENT_CM55/TOOLCHAIN_GCC_ARM",
             "Source/portable/COMPONENT_CM33/TOOLCHAIN_LLVM_ARM/COMPONENT_FREERTOS_NTZ",
             "Source/portable/COMPONENT_CM33/TOOLCHAIN_LLVM_ARM/COMPONENT_FREERTOS_TZ",
-            "Source/portable/COMPONENT_CM55/TOOLCHAIN_LLVM_ARM",            
-            "Source/portable/COMPONENT_CM0/TOOLCHAIN_IAR",
-            "Source/portable/COMPONENT_CM4/TOOLCHAIN_IAR",
-            "Source/portable/COMPONENT_CM7/TOOLCHAIN_IAR",
             "Source/portable/COMPONENT_CM33/TOOLCHAIN_IAR/COMPONENT_FREERTOS_NTZ",
             "Source/portable/COMPONENT_CM33/TOOLCHAIN_IAR/COMPONENT_FREERTOS_TZ",
+
+            "Source/portable/COMPONENT_CM55",                 
+            "Source/portable/COMPONENT_CM55/TOOLCHAIN_GCC_ARM",            
+            "Source/portable/COMPONENT_CM55/TOOLCHAIN_LLVM_ARM",
             "Source/portable/COMPONENT_CM55/TOOLCHAIN_IAR"
         ],
         "imports" : [
@@ -453,6 +462,7 @@
         "name" : "lwip",
         "exports" : [
             "src/include",
+            "src/include/lwip",
             "src/include/netif"
         ],
         "excludes" : [
@@ -591,7 +601,8 @@
     {
         "name" : "secure-sockets",
         "exports" : [
-            "include"
+            "include",
+            "source/COMPONENT_MBEDTLS/include"
         ],
         "internal" : [
             "source/COMPONENT_MBEDTLS/include",
@@ -654,7 +665,8 @@
     {
         "name" : "wpa3-external-supplicant",
         "exports" : [
-            "include"
+            "include",
+            "wpa3-external-supplicant/source/COMPONENT_MBEDTLS"
         ],
         "internal" : [
             "include"
@@ -882,7 +894,8 @@
         "exports" : [
             "USBD",
             "USBD/COMPONENT_USBD_BASE/COMPONENT_PSE84/CONFIG_Debug",
-            "USBD/COMPONENT_USBD_BASE/COMPONENT_PSE84/CONFIG_Release"
+            "USBD/COMPONENT_USBD_BASE/COMPONENT_PSE84/CONFIG_Release",
+            "USBD/COMPONENT_PSE84"
         ],
         "imports" : [
             "core-lib",
