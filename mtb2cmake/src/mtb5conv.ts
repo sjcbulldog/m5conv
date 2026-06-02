@@ -635,17 +635,36 @@ export class MTB5Converter {
             // For linker flags, if --config=<file> / -config=<file> references a
             // relative path it must be anchored to the CMake source directory so
             // CMake can locate the ICF file regardless of the build directory.
+            // --image_input flags are also stripped as they are not needed for CMake builds.
             const filterIarLinkFlags = (flagList: string[]) : string[] => {
-                return flagList.map(flag => {
+                const out: string[] = [] ;
+                let i = 0 ;
+                while (i < flagList.length) {
+                    const flag = flagList[i] ;
+                    // Strip --image_input (with optional =arg or space-separated arg).
+                    if (flag === '--image_input') {
+                        i++ ; // consume flag
+                        if (i < flagList.length && !flagList[i].startsWith('-')) {
+                            i++ ; // consume argument
+                        }
+                        continue ;
+                    }
+                    if (flag.match(/^--image_input[= ]/)) {
+                        i++ ;
+                        continue ;
+                    }
                     const m = flag.match(/^(-{1,2}config=)(.+)$/) ;
                     if (m) {
                         const filePath = m[2].replace(/^["']|["']$/g, '').replace(/\\/g, '/') ;
                         if (!path.isAbsolute(filePath) && !filePath.startsWith('${')) {
-                            return `${m[1]}\${CMAKE_CURRENT_SOURCE_DIR}/${filePath}` ;
+                            out.push(`${m[1]}\${CMAKE_CURRENT_SOURCE_DIR}/${filePath}`) ;
+                            i++ ;
+                            continue ;
                         }
                     }
-                    return flag ;
-                }) ;
+                    out.push(flagList[i++]) ;
+                }
+                return out ;
             } ;
             flags.link.debug   = filterIarLinkFlags(flags.link.debug) ;
             flags.link.release = filterIarLinkFlags(flags.link.release) ;

@@ -313,6 +313,16 @@ function readDefinesFromFile(filePath: string) : string[] {
 }
 
 //
+// Defines whose quoted-string value must be written with angle brackets
+// (e.g. MBEDTLS_CONFIG_FILE=<mbedtls/config.h>) rather than double quotes.
+// Assemblers cannot handle quoted-string macro values, and the mbedtls
+// convention is to use angle-bracket form for config file names.
+const ANGLE_BRACKET_DEFINES = new Set([
+    'MBEDTLS_CONFIG_FILE',
+    'MBEDTLS_PSA_CRYPTO_CONFIG_FILE',
+    'MBEDTLS_USER_CONFIG_FILE',
+]) ;
+
 // Resolve relative file-path values embedded in compiler defines to absolute
 // paths.  Defines like FW_IMAGE_NAME="../../mtb_shared/..." are recorded by
 // the MTB build system relative to the build directory in which codegen ran.
@@ -322,17 +332,27 @@ function readDefinesFromFile(filePath: string) : string[] {
 // relative to the directory containing the .defines file, producing an
 // absolute (forward-slash) path that is valid regardless of where cmake is
 // later invoked.
+// Additionally, defines listed in ANGLE_BRACKET_DEFINES have their quoted
+// string value converted from "VALUE" to <VALUE>.
 //
 export function fixDefineFilePaths(defines: string[], baseDir: string) : string[] {
     return defines.map(def => {
         // Match NAME="../../some/path" — a quoted double-quote value that is a relative path.
         const m = /^([^=]+=)"(\.\.\/[^"]+)"$/.exec(def) ;
-        if (!m) return def ;
-        const prefix  = m[1] ;   // e.g. "FW_IMAGE_NAME="
-        const relPath = m[2] ;   // e.g. "../../mtb_shared/wifi-host-driver/..."
-        const absPath = path.resolve(baseDir, relPath) ;
-        // Use forward slashes so the string is valid on all platforms and inside cmake strings.
-        return `${prefix}"${absPath.replace(/\\/g, '/')}"` ;
+        let result = def ;
+        if (m) {
+            const prefix  = m[1] ;   // e.g. "FW_IMAGE_NAME="
+            const relPath = m[2] ;   // e.g. "../../mtb_shared/wifi-host-driver/..."
+            const absPath = path.resolve(baseDir, relPath) ;
+            // Use forward slashes so the string is valid on all platforms and inside cmake strings.
+            result = `${prefix}"${absPath.replace(/\\/g, '/')}"` ;
+        }
+        // Convert "VALUE" → <VALUE> for the three mbedtls config-file defines.
+        const aq = /^([A-Z_][A-Z0-9_]*)="([^"]+)"$/.exec(result) ;
+        if (aq && ANGLE_BRACKET_DEFINES.has(aq[1])) {
+            return `${aq[1]}=<${aq[2]}>` ;
+        }
+        return result ;
     }) ;
 }
 
@@ -481,8 +501,11 @@ function filterCompileTokens(tokens: string[]) : string[] {
 // Tokenize a linker flag-file line and remove/fix tokens that the CMake
 // build system manages or that are Ninja/Make build-system placeholders.
 // Relative paths are rewritten relative to ${CMAKE_CURRENT_SOURCE_DIR}.
-// CMSE veneer generation flags (-Wl,--cmse-implib / --in-implib / --out-implib)
-// are stripped; their presence is signalled via hasCmse.
+// CMSE veneer generation flags are stripped; their presence is signalled via
+// hasCmse.  Recognised flag forms:
+//   GCC/LLVM  -Wl,--cmse-implib / -Wl,--out-implib <-Wl,path>
+//   IAR       --import_cmse_lib_out <path>
+//   ARM       --import-cmse-lib-out <path>
 // Library search path flags (-Xlinker -L <dir>, -L <dir>, -L<dir>) are
 // stripped from the flag list and returned separately in linkDirs.
 //
@@ -498,6 +521,11 @@ function filterLinkTokens(tokens: string[]) : { flags: string[], hasCmse: boolea
             i++ ;
         } else if (tok === '-Wl,--in-implib' || tok === '-Wl,--out-implib') {
             // Each is followed by a separate -Wl,<path> token — skip both.
+            hasCmse = true ;
+            i += 2 ;
+        } else if (tok === '--cmse_import_lib' || tok === '--import_cmse_lib_out' ||
+                   tok === '--import_cmse_lib_output' || tok === '--import-cmse-lib-out') {
+            // IAR / ARM CMSE veneer output flag — followed by the output path, skip both.
             hasCmse = true ;
             i += 2 ;
         } else if (tok === '-Xlinker' && i + 2 < tokens.length && tokens[i + 1] === '-L') {
@@ -1929,6 +1957,48 @@ export function generateFirmwareCMake(
     fs.writeFileSync(firmwarePath, lines.join('\n')) ;
 }
 
+// Returns true when a preprocessor define has a string value that cannot be
+// passed to most assemblers — either a double-quoted value (NAME="...") or an
+// angle-bracket value (NAME=<...>).  Both forms must be excluded from ASM
+// compilation units.
+function isStringValuedDefine(def: string): boolean {
+    return /^[^=]+="/.test(def) || /^[^=]+=</.test(def) ;
+}
+
+// Wrap a define string so it is excluded from ASM compilation when it carries
+// a quoted-string value.  For defines that are already wrapped in a config
+// generator expression (e.g. $<$<CONFIG:Debug>:NAME=VALUE>), the string is
+// left unwrapped here — the caller is responsible for injecting the language
+// guard before the config condition via $<$<AND:...>>.
+//
+// CMake generator-expression parsing treats '>' as the closing delimiter of a
+// genex, even when it appears inside a value string.  If the define has an
+// angle-bracket value (e.g. MBEDTLS_CONFIG_FILE=<mbedtls/mbedtls_config.h>),
+// the '>' inside the angle brackets would prematurely close the outer genex.
+// For the three mbedtls config-file macros (listed in ANGLE_BRACKET_DEFINES)
+// the closing '>' is replaced with the CMake generator expression $<ANGLE-R>
+// so the angle-bracket form is preserved in the output
+// (e.g. MBEDTLS_CONFIG_FILE=<mbedtls/mbedtls_config.h$<ANGLE-R>>).
+// For all other macros the angle-bracket value is converted to a
+// double-quoted string (e.g. NAME="value") which is equally valid for C/CXX.
+
+// Return the define in a form safe for embedding inside a CMake generator
+// expression: angle-bracket values for ANGLE_BRACKET_DEFINES use $<ANGLE-R>
+// for the closing '>'; all other angle-bracket values are double-quoted.
+function safeGenexDef(def: string): string {
+    const ab = /^([^=]+=)<([^>]+)>$/.exec(def) ;
+    if (!ab) return def ;
+    const name = ab[1].slice(0, -1) ; // strip trailing '='
+    if (ANGLE_BRACKET_DEFINES.has(name)) {
+        return `${ab[1]}<${ab[2]}$<ANGLE-R>` ;
+    }
+    return `${ab[1]}"${ab[2]}"` ;
+}
+
+function asmExclude(def: string): string {
+    return `$<$<NOT:$<COMPILE_LANGUAGE:ASM>>:${safeGenexDef(def)}>` ;
+}
+
 export function generateProjectCMakeLists(
     targetDir: string,
     projectName: string,
@@ -2047,13 +2117,25 @@ export function generateProjectCMakeLists(
     if (hasConfigDefines) {
         lines.push('add_compile_definitions(') ;
         for (const def of commonDefines) {
-            lines.push(`    ${def}`) ;
+            if (isStringValuedDefine(def)) {
+                lines.push(`    ${asmExclude(def)}`) ;
+            } else {
+                lines.push(`    ${def}`) ;
+            }
         }
         for (const def of debugOnlyDefines) {
-            lines.push(`    $<$<CONFIG:Debug>:${def}>`) ;
+            if (isStringValuedDefine(def)) {
+                lines.push(`    $<$<AND:$<CONFIG:Debug>,$<NOT:$<COMPILE_LANGUAGE:ASM>>>:${safeGenexDef(def)}>`) ;
+            } else {
+                lines.push(`    $<$<CONFIG:Debug>:${def}>`) ;
+            }
         }
         for (const def of releaseOnlyDefines) {
-            lines.push(`    $<$<CONFIG:Release>:${def}>`) ;
+            if (isStringValuedDefine(def)) {
+                lines.push(`    $<$<AND:$<CONFIG:Release>,$<NOT:$<COMPILE_LANGUAGE:ASM>>>:${safeGenexDef(def)}>`) ;
+            } else {
+                lines.push(`    $<$<CONFIG:Release>:${def}>`) ;
+            }
         }
         lines.push(')') ;
         lines.push('') ;
@@ -2126,16 +2208,50 @@ export function generateProjectCMakeLists(
         lines.push('set(NSC_VENEER_TMP  ${CMAKE_CURRENT_BINARY_DIR}/nsc_veneer.o.tmp)') ;
         lines.push('set(NSC_VENEER_PATH ${CMAKE_CURRENT_SOURCE_DIR}/nsc_veneer.o)') ;
         lines.push('') ;
-        // Emit veneer link flags for every toolchain that had them in .ldflags.
-        const cmseCondition = cmseToolchains
-            .map(tc => `MTBTOOLCHAIN STREQUAL "${tc}"`)
-            .join(' OR ') ;
-        lines.push(`if(${cmseCondition})`) ;
-        lines.push('    target_link_options(${APPNAME} PRIVATE') ;
-        lines.push('        -Wl,--cmse-implib') ;
-        lines.push('        -Wl,--out-implib=${NSC_VENEER_TMP}') ;
-        lines.push('    )') ;
-        lines.push('endif()') ;
+
+        // Emit veneer link flags per toolchain family, all pointing to the
+        // binary-dir temp file so the linker never writes into the source tree.
+        const gnuCmse  = cmseToolchains.filter(tc => tc === 'GCC_ARM' || tc === 'LLVM_ARM') ;
+        const hasIar   = cmseToolchains.includes('IAR') ;
+        const hasArm   = cmseToolchains.includes('ARM') ;
+
+        interface CmseBlock { condition: string ; flags: string[] }
+        const cmseBlocks: CmseBlock[] = [] ;
+        if (gnuCmse.length > 0) {
+            cmseBlocks.push({
+                condition: gnuCmse.map(tc => `MTBTOOLCHAIN STREQUAL "${tc}"`).join(' OR '),
+                flags: [
+                    '        -Wl,--cmse-implib',
+                    '        -Wl,--out-implib=${NSC_VENEER_TMP}',
+                ],
+            }) ;
+        }
+        if (hasIar) {
+            cmseBlocks.push({
+                condition: 'MTBTOOLCHAIN STREQUAL "IAR"',
+                flags: [
+                    '        --import_cmse_lib_out',
+                    '        ${NSC_VENEER_TMP}',
+                ],
+            }) ;
+        }
+        if (hasArm) {
+            cmseBlocks.push({
+                condition: 'MTBTOOLCHAIN STREQUAL "ARM"',
+                flags: [
+                    '        --import-cmse-lib-out',
+                    '        ${NSC_VENEER_TMP}',
+                ],
+            }) ;
+        }
+        for (let bi = 0; bi < cmseBlocks.length; bi++) {
+            const keyword = bi === 0 ? 'if' : 'elseif' ;
+            lines.push(`${keyword}(${cmseBlocks[bi].condition})`) ;
+            lines.push('    target_link_options(${APPNAME} PRIVATE') ;
+            lines.push(...cmseBlocks[bi].flags) ;
+            lines.push('    )') ;
+        }
+        if (cmseBlocks.length > 0) lines.push('endif()') ;
         lines.push('') ;
         lines.push('add_custom_command(') ;
         lines.push('    OUTPUT ${NSC_VENEER_PATH}') ;
@@ -3405,15 +3521,15 @@ export function generateWifiHostDriverResourceDefines(
             }
             lines.push('    add_compile_definitions(') ;
             if (clmRelPath) {
-                lines.push(`        CLM_IMAGE_NAME="\${CMAKE_CURRENT_SOURCE_DIR}/../wifi-resources/${clmRelPath}"`) ;
+                lines.push(`        $<$<NOT:$<COMPILE_LANGUAGE:ASM>>:CLM_IMAGE_NAME=<\${CMAKE_CURRENT_SOURCE_DIR}/../wifi-resources/${clmRelPath}>>`) ;
                 lines.push(`        CLM_IMAGE_SIZE=\${_wifi_clm_size}`) ;
             }
             if (fwEntry?.normal) {
-                lines.push(`        FW_IMAGE_NAME="\${CMAKE_CURRENT_SOURCE_DIR}/${fwEntry.normal}"`) ;
+                lines.push(`        $<$<NOT:$<COMPILE_LANGUAGE:ASM>>:FW_IMAGE_NAME=<\${CMAKE_CURRENT_SOURCE_DIR}/${fwEntry.normal}>>`) ;
                 lines.push(`        FW_IMAGE_SIZE=\${_wifi_fw_size}`) ;
             }
             if (nvramRelPath) {
-                lines.push(`        NVRAM_IMAGE_NAME="\${CMAKE_CURRENT_SOURCE_DIR}/../wifi-resources/${nvramRelPath}"`) ;
+                lines.push(`        $<$<NOT:$<COMPILE_LANGUAGE:ASM>>:NVRAM_IMAGE_NAME=<\${CMAKE_CURRENT_SOURCE_DIR}/../wifi-resources/${nvramRelPath}>>`) ;
                 lines.push(`        NVRAM_IMAGE_SIZE=\${_wifi_nvram_size}`) ;
             }
             lines.push('    )') ;
@@ -3429,11 +3545,11 @@ export function generateWifiHostDriverResourceDefines(
                 }
                 lines.push('    add_compile_definitions(') ;
                 if (clmRelPath) {
-                    lines.push(`        CLM_IMAGE_NAME="\${CMAKE_CURRENT_SOURCE_DIR}/../wifi-resources/${clmRelPath}"`) ;
+                    lines.push(`        $<$<NOT:$<COMPILE_LANGUAGE:ASM>>:CLM_IMAGE_NAME=<\${CMAKE_CURRENT_SOURCE_DIR}/../wifi-resources/${clmRelPath}>>`) ;
                     lines.push(`        CLM_IMAGE_SIZE=\${_wifi_clm_size}`) ;
                 }
                 if (nvramRelPath) {
-                    lines.push(`        NVRAM_IMAGE_NAME="\${CMAKE_CURRENT_SOURCE_DIR}/../wifi-resources/${nvramRelPath}"`) ;
+                    lines.push(`        $<$<NOT:$<COMPILE_LANGUAGE:ASM>>:NVRAM_IMAGE_NAME=<\${CMAKE_CURRENT_SOURCE_DIR}/../wifi-resources/${nvramRelPath}>>`) ;
                     lines.push(`        NVRAM_IMAGE_SIZE=\${_wifi_nvram_size}`) ;
                 }
                 lines.push('    )') ;
@@ -3443,7 +3559,7 @@ export function generateWifiHostDriverResourceDefines(
                 if (fwEntry.sense) {
                     lines.push(`        file(SIZE "\${CMAKE_CURRENT_SOURCE_DIR}/${fwEntry.sense}" _wifi_fw_size)`) ;
                     lines.push('        add_compile_definitions(') ;
-                    lines.push(`            FW_IMAGE_NAME="\${CMAKE_CURRENT_SOURCE_DIR}/${fwEntry.sense}"`) ;
+                    lines.push(`            $<$<NOT:$<COMPILE_LANGUAGE:ASM>>:FW_IMAGE_NAME=<\${CMAKE_CURRENT_SOURCE_DIR}/${fwEntry.sense}>>`) ;
                     lines.push(`            FW_IMAGE_SIZE=\${_wifi_fw_size}`) ;
                     lines.push('        )') ;
                 }
@@ -3451,7 +3567,7 @@ export function generateWifiHostDriverResourceDefines(
                     lines.push('    else()') ;
                     lines.push(`        file(SIZE "\${CMAKE_CURRENT_SOURCE_DIR}/${fwEntry.normal}" _wifi_fw_size)`) ;
                     lines.push('        add_compile_definitions(') ;
-                    lines.push(`            FW_IMAGE_NAME="\${CMAKE_CURRENT_SOURCE_DIR}/${fwEntry.normal}"`) ;
+                    lines.push(`            $<$<NOT:$<COMPILE_LANGUAGE:ASM>>:FW_IMAGE_NAME=<\${CMAKE_CURRENT_SOURCE_DIR}/${fwEntry.normal}>>`) ;
                     lines.push(`            FW_IMAGE_SIZE=\${_wifi_fw_size}`) ;
                     lines.push('        )') ;
                 }
@@ -3462,7 +3578,173 @@ export function generateWifiHostDriverResourceDefines(
         lines.push('endif()') ;
     }
 
+    // -- Generate IAR assembler resource files and corresponding target_sources blocks --
+    //
+    // For IAR, the RESOURCE_BIN_ADD macro (which uses GAS .incbin) is excluded by
+    // #ifndef __IAR_SYSTEMS_ICC__ guards in resources.h, clm_resources.h, and
+    // wifi_nvram_image.h.  We generate IASM (.s) files that use INCBIN instead, and
+    // add them via target_sources so the IAR assembler embeds the binary data.
+    //
+    // Note: wifi_nvram_image_size is already defined for IAR in wifi_nvram_image.h,
+    // so we do NOT emit a size symbol from the NVRAM assembler file.
+
+    const iarResourcesDir = path.join(wifiHostDriverDir, 'iar_resources') ;
+    fs.mkdirSync(iarResourcesDir, { recursive: true }) ;
+
+    // Helper: convert a Windows path to forward-slash form for use in INCBIN strings.
+    const toFwdSlash = (p: string) => p.replace(/\\/g, '/') ;
+
+    // Helper: make a sanitized file-key from chip/board component names.
+    // Strips leading 'COMPONENT_' and replaces hyphens with underscores.
+    const sanitizeComp = (c: string) => c.replace(/^COMPONENT_/, '').replace(/-/g, '_') ;
+
+    const iarLines: string[] = [] ;
+    iarLines.push('') ;
+    iarLines.push('#') ;
+    iarLines.push('# IAR assembler sources for binary resource embedding.') ;
+    iarLines.push('# For IAR, RESOURCE_BIN_ADD is excluded by __IAR_SYSTEMS_ICC__ guards;') ;
+    iarLines.push('# the binary data is provided via IASM INCBIN directives instead.') ;
+    iarLines.push('#') ;
+    iarLines.push('if(MTBTOOLCHAIN STREQUAL "IAR")') ;
+
+    for (const key of allKeys) {
+        const slashIdx = key.indexOf('/') ;
+        const chipComp  = key.slice(0, slashIdx) ;
+        const boardComp = key.slice(slashIdx + 1) ;
+
+        const fwEntry     = fwByChip.get(chipComp) ;
+        const clmRelPath  = clmByChipBoard.get(key) ;
+        const nvramRelPath = nvramByChipBoard.get(key) ;
+
+        const boardCond   = boardComp.replace(/-/g, '_') ;
+        const fileKey     = `${sanitizeComp(chipComp)}_${sanitizeComp(boardComp)}` ;
+        const hasSense    = !!(fwEntry?.sense) ;
+
+        // --- FW assembler file(s) ---
+        if (fwEntry?.normal) {
+            const fwAbsPath = toFwdSlash(path.join(wifiHostDriverDir, fwEntry.normal)) ;
+            const fwAsmLines = [
+                `; Auto-generated by mtb2cmake for IAR — DO NOT EDIT`,
+                `        MODULE  wifi_firmware_module`,
+                `        SECTION .rodata:CONST:NOROOT(2)`,
+                `        PUBLIC  wifi_firmware_image_data`,
+                `        DATA`,
+                `wifi_firmware_image_data:`,
+                `        INCBIN  "${fwAbsPath}"`,
+                `wifi_firmware_image_data_end:`,
+                `        SECTION .rodata:CONST:NOROOT(2)`,
+                `        PUBLIC  wifi_firmware_image_size`,
+                `        DATA`,
+                `wifi_firmware_image_size:`,
+                `        DCD     (wifi_firmware_image_data_end - wifi_firmware_image_data)`,
+                `        END`,
+            ] ;
+            fs.writeFileSync(path.join(iarResourcesDir, `${fileKey}_fw.s`), fwAsmLines.join('\n') + '\n') ;
+        }
+        if (fwEntry?.sense) {
+            const fwSenseAbsPath = toFwdSlash(path.join(wifiHostDriverDir, fwEntry.sense)) ;
+            const fwSenseAsmLines = [
+                `; Auto-generated by mtb2cmake for IAR — DO NOT EDIT`,
+                `        MODULE  wifi_firmware_module`,
+                `        SECTION .rodata:CONST:NOROOT(2)`,
+                `        PUBLIC  wifi_firmware_image_data`,
+                `        DATA`,
+                `wifi_firmware_image_data:`,
+                `        INCBIN  "${fwSenseAbsPath}"`,
+                `wifi_firmware_image_data_end:`,
+                `        SECTION .rodata:CONST:NOROOT(2)`,
+                `        PUBLIC  wifi_firmware_image_size`,
+                `        DATA`,
+                `wifi_firmware_image_size:`,
+                `        DCD     (wifi_firmware_image_data_end - wifi_firmware_image_data)`,
+                `        END`,
+            ] ;
+            fs.writeFileSync(path.join(iarResourcesDir, `${fileKey}_fw_sense.s`), fwSenseAsmLines.join('\n') + '\n') ;
+        }
+
+        // --- CLM assembler file ---
+        if (clmRelPath) {
+            const clmAbsPath = toFwdSlash(path.join(wifiResourcesDir, clmRelPath)) ;
+            const clmAsmLines = [
+                `; Auto-generated by mtb2cmake for IAR — DO NOT EDIT`,
+                `        MODULE  wifi_clm_module`,
+                `        SECTION .rodata:CONST:NOROOT(2)`,
+                `        PUBLIC  wifi_firmware_clm_blob_data`,
+                `        DATA`,
+                `wifi_firmware_clm_blob_data:`,
+                `        INCBIN  "${clmAbsPath}"`,
+                `wifi_firmware_clm_blob_data_end:`,
+                `        SECTION .rodata:CONST:NOROOT(2)`,
+                `        PUBLIC  wifi_firmware_clm_blob_size`,
+                `        DATA`,
+                `wifi_firmware_clm_blob_size:`,
+                `        DCD     (wifi_firmware_clm_blob_data_end - wifi_firmware_clm_blob_data)`,
+                `        END`,
+            ] ;
+            fs.writeFileSync(path.join(iarResourcesDir, `${fileKey}_clm.s`), clmAsmLines.join('\n') + '\n') ;
+        }
+
+        // --- NVRAM assembler file ---
+        // wifi_nvram_image_size is already defined for IAR in wifi_nvram_image.h,
+        // so only the data array needs to be provided here.
+        if (nvramRelPath) {
+            const nvramAbsPath = toFwdSlash(path.join(wifiResourcesDir, nvramRelPath)) ;
+            const nvramAsmLines = [
+                `; Auto-generated by mtb2cmake for IAR — DO NOT EDIT`,
+                `        MODULE  wifi_nvram_module`,
+                `        SECTION .rodata:CONST:NOROOT(2)`,
+                `        PUBLIC  wifi_nvram_image_data`,
+                `        DATA`,
+                `wifi_nvram_image_data:`,
+                `        INCBIN  "${nvramAbsPath}"`,
+                `        END`,
+            ] ;
+            fs.writeFileSync(path.join(iarResourcesDir, `${fileKey}_nvram.s`), nvramAsmLines.join('\n') + '\n') ;
+        }
+
+        // --- CMake target_sources block ---
+        iarLines.push('') ;
+        iarLines.push(`if(COMPONENT_WIFI6 AND ${chipComp} AND COMPONENT_SM AND ${boardCond})`) ;
+
+        if (hasSense && fwEntry?.sense && fwEntry?.normal) {
+            iarLines.push('    if(COMPONENT_WLANSENSE)') ;
+            iarLines.push(`        target_sources(\${MTB5_ASSET_TARGET} PRIVATE`) ;
+            iarLines.push(`            \${CMAKE_CURRENT_SOURCE_DIR}/iar_resources/${fileKey}_fw_sense.s`) ;
+            iarLines.push('        )') ;
+            iarLines.push('    else()') ;
+            iarLines.push(`        target_sources(\${MTB5_ASSET_TARGET} PRIVATE`) ;
+            iarLines.push(`            \${CMAKE_CURRENT_SOURCE_DIR}/iar_resources/${fileKey}_fw.s`) ;
+            iarLines.push('        )') ;
+            iarLines.push('    endif()') ;
+        } else if (hasSense && fwEntry?.sense) {
+            // Only a sense variant exists for this chip
+            iarLines.push(`    target_sources(\${MTB5_ASSET_TARGET} PRIVATE`) ;
+            iarLines.push(`        \${CMAKE_CURRENT_SOURCE_DIR}/iar_resources/${fileKey}_fw_sense.s`) ;
+            iarLines.push('    )') ;
+        } else if (fwEntry?.normal) {
+            iarLines.push(`    target_sources(\${MTB5_ASSET_TARGET} PRIVATE`) ;
+            iarLines.push(`        \${CMAKE_CURRENT_SOURCE_DIR}/iar_resources/${fileKey}_fw.s`) ;
+            iarLines.push('    )') ;
+        }
+
+        const extraSources: string[] = [] ;
+        if (clmRelPath)   extraSources.push(`        \${CMAKE_CURRENT_SOURCE_DIR}/iar_resources/${fileKey}_clm.s`) ;
+        if (nvramRelPath) extraSources.push(`        \${CMAKE_CURRENT_SOURCE_DIR}/iar_resources/${fileKey}_nvram.s`) ;
+        if (extraSources.length > 0) {
+            iarLines.push(`    target_sources(\${MTB5_ASSET_TARGET} PRIVATE`) ;
+            iarLines.push(...extraSources) ;
+            iarLines.push('    )') ;
+        }
+
+        iarLines.push('endif()') ;
+    }
+
+    iarLines.push('') ;
+    iarLines.push('endif() # MTBTOOLCHAIN STREQUAL "IAR"') ;
+    iarLines.push('') ;
+
     lines.push('') ;
+    lines.push(...iarLines) ;
 
     const cmakePath = path.join(wifiHostDriverDir, 'CMakeLists.txt') ;
     fs.appendFileSync(cmakePath, lines.join('\n')) ;

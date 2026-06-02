@@ -10,8 +10,8 @@
       "program": "${workspaceFolder}/src/index.ts",
       "args" : [
         "--force", 
-        "--input", "C:/sdk/mtb5/${input:mtbProjectName}", 
-        "--iar", "C:/sdk/iar/${input:mtbProjectName}"
+        "--input", "C:/mtb5/edge/${input:mtbProjectName}", 
+        "--iar", "C:/iar/${input:mtbProjectName}"
       ],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",

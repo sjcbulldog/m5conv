@@ -422,6 +422,7 @@
         ],
         "imports" : [
             "core-lib",
+            "clib-support",
             "abstraction-rtos",
             "core-lib",
             "cmsis",
@@ -516,6 +517,7 @@
         "imports" : [
             "mtb-dsl-pse8xxgp",
             "core-lib",
+            "clib-support",
             "abstraction-rtos",
             "freertos",
             "cmsis",
@@ -537,6 +539,7 @@
             "core-lib",
             "mtb-dsl-pse8xxgp",
             "cmsis",
+            "clib-support",
             "mtb-srf",
             "mtb-ipc",
             "async-transfer",
@@ -560,6 +563,7 @@
             "mtb-dsl-pse8xxgp",
             "core-lib",
             "cmsis",
+            "clib-support",
             "mtb-srf",
             "mtb-ipc",
             "ifx-mbedtls",
@@ -579,6 +583,7 @@
         ],
         "imports" : [
             "lwip",
+            "clib-support",
             "lwip-freertos-integration",
             "connectivity-utilities",
             "whd-bsp-integration",
@@ -611,6 +616,7 @@
         "imports" : [
             "connectivity-utilities",
             "lwip",
+            "clib-support",
             "lwip-freertos-integration",
             "lwip-network-interface-integration",
             "wifi-core-freertos-lwip-mbedtls",
@@ -644,6 +650,7 @@
             "abstraction-rtos",
             "cmsis",
             "freertos",
+            "clib-support",
             "mtb-dsl-pse8xxgp",
             "mtb-srf",
             "mtb-ipc",
@@ -674,6 +681,7 @@
         "imports" : [
             "core-lib",
             "abstraction-rtos",
+            "clib-support",
             "cmsis",
             "freertos",
             "mtb-dsl-pse8xxgp",

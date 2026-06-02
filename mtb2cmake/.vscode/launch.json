@@ -12,10 +12,10 @@
             "console": "integratedTerminal",
             "args": [
                 "--force",
+                "--target", "iar",
                 "--depends", "${workspaceFolder}/depends.json",
-                "--target", "gcc",
-                "--source", "c:/sdk/mtb/KIT_PSE84_EVAL_EPC2/${input:mtbProjectName}",
-                "--dest", "c:/sdk/mtb5/${input:mtbProjectName}",
+                "--source", "c:/mtb/edge/${input:mtbProjectName}",
+                "--dest", "c:/mtb5/edge/${input:mtbProjectName}",
             ]
         }
     ],
