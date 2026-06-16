@@ -13,6 +13,7 @@
  */
 import { promises as fs } from "node:fs";
 import type { Dirent } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import type { CMakeModel, Target } from "../cmake/index.js";
 import { renderEwp, type IarEwpInput, type IarFileEntry } from "./ewp.js";
@@ -45,6 +46,8 @@ interface ProjectPlan {
   icfFile?: string;
   /** Absolute path for the CMSE import library output (--import_cmse_lib_out). */
   cmseLibOut?: string;
+  /** Absolute path of the CMSE import library to link into the non-secure project (--import_cmse_lib_in). */
+  cmseLibIn?: string;
 }
 
 const SOURCE_EXTS = new Set([
@@ -95,10 +98,36 @@ export class IarGenerator {
     const hexPathMap = new Map<string, string>();
     const buildDirFwd = this.model.paths.build.replace(/\\/g, "/");
     const destDirFwd = this.opts.destDir.replace(/\\/g, "/");
+
+    // Pass 1: build all plans so we can resolve cross-project paths (e.g. CMSE veneer).
+    const plans: ProjectPlan[] = [];
     for (const exe of executables) {
-      const plan = await this.buildPlan(exe);
-      await this.writeProject(plan);
-      const pname = IarGenerator.stripElfExt(exe.name);
+      plans.push(await this.buildPlan(exe));
+    }
+
+    // Build a map from the cmake-build absolute path of each CMSE import library output
+    // to the IAR project name and filename that will produce it.  This lets the
+    // non-secure project reference the correct IAR-relative path.
+    const cmseLibOutMap = new Map<string, { projName: string; filename: string }>();
+    for (const plan of plans) {
+      if (plan.cmseLibOut) {
+        const projName = IarGenerator.stripElfExt(plan.exe.name);
+        cmseLibOutMap.set(plan.cmseLibOut, { projName, filename: path.basename(plan.cmseLibOut) });
+      }
+    }
+
+    // Pass 2: write all projects.
+    for (const plan of plans) {
+      // Resolve cmseLibIn (non-secure project) → path relative to its own $PROJ_DIR$.
+      let resolvedCmseLibIn: string | undefined;
+      if (plan.cmseLibIn) {
+        const entry = cmseLibOutMap.get(plan.cmseLibIn);
+        if (entry) {
+          resolvedCmseLibIn = `$PROJ_DIR$/../${entry.projName}/Debug/Exe/${entry.filename}`;
+        }
+      }
+      await this.writeProject(plan, resolvedCmseLibIn);
+      const pname = IarGenerator.stripElfExt(plan.exe.name);
       projectRefs.push({ ewpRelPath: `${pname}/${pname}.ewp`, name: pname });
       // Map the cmake-build hex path to the IAR output hex path.
       hexPathMap.set(
@@ -255,6 +284,7 @@ export class IarGenerator {
       extraLinkFlags: this.extractExtraLinkFlags(exe),
       icfFile: this.extractIcfFile(exe),
       cmseLibOut: this.extractCmseLibOut(exe),
+      cmseLibIn: this.extractCmseLibIn(exe),
     };
   }
 
@@ -271,6 +301,14 @@ export class IarGenerator {
     return a === s || a.startsWith(s + path.sep);
   }
 
+  /** Returns true when `absPath` is inside the `bsps/` sub-tree of the source directory. */
+  private isBspPath(absPath: string): boolean {
+    const bspsDir = path.join(path.resolve(this.opts.sourceDir), "bsps");
+    const a = path.resolve(absPath).toLowerCase();
+    const b = bspsDir.toLowerCase();
+    return a === b || a.startsWith(b + path.sep);
+  }
+
   /** Project-relative path used inside .ewp ($PROJ_DIR$/<this>). */
   private computeProjectRelPath(absSource: string): string {
     if (this.isUnderSourceDir(absSource)) {
@@ -284,17 +322,26 @@ export class IarGenerator {
       .join("/");
   }
 
-  /** Convert an absolute include path to one usable from inside the project. */
+  /** Convert an absolute include path to one usable from inside the project.
+   *  Include directories that live under `bsps/` are redirected to the shared
+   *  BSP directory (`$PROJ_DIR$/../bsp/src/<rel>`) so they are not duplicated
+   *  inside every individual project. */
   private rebaseIncludeForProject(incPath: string, projDir: string): string {
     if (path.isAbsolute(incPath) && this.isUnderSourceDir(incPath)) {
       const rel = path.relative(path.resolve(this.opts.sourceDir), incPath);
-      return `$PROJ_DIR$/src/${rel.split(path.sep).join("/")}`;
+      const relFwd = rel.split(path.sep).join("/");
+      return this.isBspPath(incPath)
+        ? `$PROJ_DIR$/../bsp/src/${relFwd}`
+        : `$PROJ_DIR$/src/${relFwd}`;
     }
     if (!path.isAbsolute(incPath)) {
       const abs = path.resolve(this.opts.sourceDir, incPath);
       if (this.isUnderSourceDir(abs)) {
         const rel = path.relative(path.resolve(this.opts.sourceDir), abs);
-        return `$PROJ_DIR$/src/${rel.split(path.sep).join("/")}`;
+        const relFwd = rel.split(path.sep).join("/");
+        return this.isBspPath(abs)
+          ? `$PROJ_DIR$/../bsp/src/${relFwd}`
+          : `$PROJ_DIR$/src/${relFwd}`;
       }
     }
     return incPath.split(path.sep).join("/");
@@ -321,6 +368,7 @@ export class IarGenerator {
       if (f === "--config") { i++; continue; }               // --config <file>
       if (f.startsWith("--config=")) continue;               // --config=<file>
       if (f === "--import_cmse_lib_out") { i++; continue; }  // handled via IlinkTrustzoneImportLibraryOut
+      if (f === "--import_cmse_lib_in") { i++; continue; }   // handled via IlinkAdditionalLibs
       result.push(f);
     }
     return result;
@@ -332,13 +380,41 @@ export class IarGenerator {
     for (let i = 0; i < frags.length; i++) {
       const f = frags[i];
       if (f.startsWith("--config=")) {
-        return path.resolve(f.slice("--config=".length)).replace(/\\/g, "/");
+        return this.resolveLinkPath(f.slice("--config=".length));
       }
       if (f === "--config" && i + 1 < frags.length) {
-        return path.resolve(frags[i + 1]).replace(/\\/g, "/");
+        return this.resolveLinkPath(frags[i + 1]);
       }
     }
     return undefined;
+  }
+
+  /** Resolve linker path fragments in a stable way.
+   *  Relative paths are first checked against the CMake source dir and then the
+   *  CMake build dir, falling back to process cwd resolution only as a last
+   *  resort. */
+  private resolveLinkPath(rawPath: string): string {
+    const unquoted = rawPath.replace(/^['"]|['"]$/g, "").trim();
+    if (!unquoted) return unquoted;
+    if (path.isAbsolute(unquoted)) {
+      return path.resolve(unquoted).replace(/\\/g, "/");
+    }
+
+    const sourceCandidate = path.resolve(this.opts.sourceDir, unquoted);
+    if (this.pathExists(sourceCandidate)) {
+      return sourceCandidate.replace(/\\/g, "/");
+    }
+
+    const buildCandidate = path.resolve(this.model.paths.build, unquoted);
+    if (this.pathExists(buildCandidate)) {
+      return buildCandidate.replace(/\\/g, "/");
+    }
+
+    return path.resolve(unquoted).replace(/\\/g, "/");
+  }
+
+  private pathExists(p: string): boolean {
+    return existsSync(p);
   }
 
   /** Extract and normalise the CMSE import library output path from --import_cmse_lib_out. */
@@ -346,7 +422,25 @@ export class IarGenerator {
     const frags = exe.link?.flags().map((f) => f.fragment.trim()).filter(Boolean) ?? [];
     for (let i = 0; i < frags.length; i++) {
       if (frags[i] === "--import_cmse_lib_out" && i + 1 < frags.length) {
-        return path.resolve(frags[i + 1]).replace(/\\/g, "/");
+        return path.basename(frags[i + 1]);
+      }
+    }
+    return undefined;
+  }
+
+  /** Extract and normalise the CMSE import library input path from --import_cmse_lib_in. */
+  private extractCmseLibIn(exe: Target): string | undefined {
+    const frags = exe.link?.flags().map((f) => f.fragment.trim()).filter(Boolean) ?? [];
+    for (let i = 0; i < frags.length; i++) {
+      if (frags[i] === "--import_cmse_lib_in" && i + 1 < frags.length) {
+        return path.basename(frags[i + 1]);
+      }
+    }
+    // Also check library fragments — some CMake setups add the veneer as a library.
+    for (const lib of exe.link?.libraries() ?? []) {
+      const frag = lib.fragment.trim();
+      if (path.extname(frag).toLowerCase() === ".o" && path.basename(frag).toLowerCase().includes("veneer")) {
+        return path.basename(frag);
       }
     }
     return undefined;
@@ -441,21 +535,27 @@ export class IarGenerator {
     return name.endsWith(".elf") ? name.slice(0, -4) : name;
   }
 
-  private async writeProject(plan: ProjectPlan): Promise<void> {
+  private async writeProject(plan: ProjectPlan, cmseLibIn?: string): Promise<void> {
     const projName = IarGenerator.stripElfExt(plan.exe.name);
     const projDir = path.join(this.opts.destDir, projName);
     await fs.mkdir(projDir, { recursive: true });
 
+    // Shared BSP directory at the workspace root — one copy for all projects.
+    const bspDir = path.join(this.opts.destDir, "bsp");
+
     const copied = new Set<string>();
     const files: IarFileEntry[] = [];
     for (const s of plan.sources) {
-      const destAbs = path.join(projDir, s.projectRelPath);
+      const isBsp = this.isBspPath(s.absSource);
+      const fileBase = isBsp ? bspDir : projDir;
+      const ewpRelPath = isBsp ? `../bsp/${s.projectRelPath}` : s.projectRelPath;
+      const destAbs = path.join(fileBase, s.projectRelPath);
       if (copied.has(destAbs)) continue;
       copied.add(destAbs);
       try {
         await fs.mkdir(path.dirname(destAbs), { recursive: true });
         await fs.copyFile(s.absSource, destAbs);
-        files.push({ projectRelPath: s.projectRelPath, group: s.group });
+        files.push({ projectRelPath: ewpRelPath, group: s.group });
       } catch (err) {
         // Skip files that can't be located on disk (often generated).
         if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
@@ -478,6 +578,7 @@ export class IarGenerator {
     // Copy header and companion source files that sit alongside copied sources
     // (e.g. user-customizable stubs not listed in target_sources).
     // Skipped for asset dirs — those are copied in full below.
+    // BSP dirs are redirected to the shared bsp/ directory.
     const scannedDirs = new Set<string>();
     for (const s of plan.sources) {
       const srcDir = path.dirname(s.absSource);
@@ -492,6 +593,9 @@ export class IarGenerator {
         continue;
       }
 
+      const isBspDir = this.isBspPath(srcDir);
+      const fileBase = isBspDir ? bspDir : projDir;
+      const ewpDirPrefix = isBspDir ? "../bsp/" : "";
       const destRelDir = path.posix.dirname(s.projectRelPath);
       const headerGroup = s.group.replace(/^Source Files\//, "Header Files/");
 
@@ -503,14 +607,14 @@ export class IarGenerator {
         if (!isHeader && !isSource) continue;
         const absFile = path.join(srcDir, entry.name);
         const relFile = `${destRelDir}/${entry.name}`;
-        const destFile = path.join(projDir, relFile);
+        const destFile = path.join(fileBase, relFile);
         if (copied.has(destFile)) continue;
         copied.add(destFile);
         const group = isHeader ? headerGroup : s.group;
         try {
           await fs.mkdir(path.dirname(destFile), { recursive: true });
           await fs.copyFile(absFile, destFile);
-          files.push({ projectRelPath: relFile, group });
+          files.push({ projectRelPath: `${ewpDirPrefix}${relFile}`, group });
         } catch (err) {
           if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
         }
@@ -526,23 +630,56 @@ export class IarGenerator {
     }
 
     // Recursively copy all headers from every include directory under the source tree.
+    // BSP include directories are redirected to the shared bsp/ directory.
     for (const absIncDir of plan.absIncludeDirs) {
-      await this.copyHeadersRecursive(absIncDir, projDir, copied, files);
+      if (this.isBspPath(absIncDir)) {
+        await this.copyHeadersRecursive(absIncDir, projDir, copied, files, bspDir, "../bsp/");
+      } else {
+        await this.copyHeadersRecursive(absIncDir, projDir, copied, files);
+      }
     }
+
+    // Copy ICF file directory (and siblings, to satisfy ICF include directives)
+    // when the file lives inside the source tree, then produce a $PROJ_DIR$-
+    // relative reference.  ICF files in the BSP are redirected to the shared
+    // bsp/ directory and referenced via $PROJ_DIR$/../bsp/src/...
+    let icfFile = plan.icfFile;
+    if (icfFile && this.isUnderSourceDir(icfFile)) {
+      await this.copyDirToProject(path.dirname(icfFile), projDir, copied, bspDir);
+      if (this.isBspPath(icfFile)) {
+        const rel = path.relative(path.resolve(this.opts.sourceDir), path.resolve(icfFile)).replace(/\\/g, "/");
+        icfFile = `$PROJ_DIR$/../bsp/src/${rel}`;
+      } else {
+        icfFile = this.rebaseSourceDirRefs(icfFile);
+      }
+    }
+
+    // Rebase any source-dir absolute paths embedded in preprocessor defines
+    // (e.g. CLM_IMAGE_NAME, FW_IMAGE_NAME, NVRAM_IMAGE_NAME) so they point
+    // into the copied $PROJ_DIR$/src/ tree instead of the original CMake dir.
+    const rebasedDefines = [...plan.defines].sort().map((d) => this.rebaseSourceDirRefs(d));
+
+    // Rebase source-dir paths in extra linker flags (e.g. --image_input=...).
+    const rebasedLinkFlags = (plan.extraLinkFlags ?? []).map((f) => this.rebaseSourceDirRefs(f));
 
     const ewpInput: IarEwpInput = {
       projectName: projName,
       cpuVariant: plan.cpu,
       chipMenuEntry: plan.chipEntry,
       outputFile: plan.outputFile,
-      defines: [...plan.defines].sort(),
+      defines: rebasedDefines,
       includePaths: plan.includes,
       files,
       useClibSupport: plan.defines.has("COMPONENT_MW_CLIB_SUPPORT"),
       generateHex: true,
-      extraLinkFlags: plan.extraLinkFlags,
-      icfFile: plan.icfFile,
-      cmseLibOut: plan.cmseLibOut,
+      extraLinkFlags: rebasedLinkFlags,
+      icfFile,
+      // Use an IAR project-relative path so the secure project writes the veneer
+      // to a predictable location within its own output directory.
+      cmseLibOut: plan.cmseLibOut
+        ? `$PROJ_DIR$/Debug/Exe/${path.basename(plan.cmseLibOut)}`
+        : undefined,
+      cmseLibIn,
     };
     const ewpPath = path.join(projDir, `${projName}.ewp`);
     await fs.writeFile(ewpPath, renderEwp(ewpInput), "utf8");
@@ -673,6 +810,92 @@ export class IarGenerator {
   }
 
   /**
+   * Replace all occurrences of the CMake source root in `text` with the
+   * project-relative prefix `$PROJ_DIR$/src`, normalising any `../` segments
+   * that may appear in the embedded path.  Handles both forward and backward
+   * slash forms of the source root.
+   */
+  private rebaseSourceDirRefs(text: string): string {
+    const srcAbs = path.resolve(this.opts.sourceDir).replace(/\\/g, "/");
+    // Also handle the backslash form that may appear in CMake-generated strings
+    // on Windows.
+    const srcAbsBwd = srcAbs.replace(/\//g, "\\");
+
+    // Inner helper: given the portion of the path *after* the source-root
+    // prefix, normalise `../` segments and build the replacement string.
+    const buildReplacement = (rest: string): string => {
+      const combined = srcAbs + rest.replace(/\\/g, "/");
+      const parts = combined.split("/");
+      const normalised: string[] = [];
+      for (const p of parts) {
+        if (p === "..") normalised.pop();
+        else if (p !== ".") normalised.push(p);
+      }
+      const fullNorm = normalised.join("/");
+      const rel = fullNorm.slice(srcAbs.length).replace(/^\//, "");
+      return `$PROJ_DIR$/src/${rel}`;
+    };
+
+    // Build a case-insensitive regex that matches the source root followed by
+    // any path continuation (path separators and non-whitespace/non-delimiter).
+    const escFwd = srcAbs.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    let result = text.replace(
+      new RegExp(escFwd + "([^<>&\"\\s]*)", "gi"),
+      (_match, rest: string) => buildReplacement(rest),
+    );
+
+    // Also handle the backslash variant if it differs.
+    if (srcAbsBwd !== srcAbs) {
+      const escBwd = srcAbsBwd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      result = result.replace(
+        new RegExp(escBwd + "([^<>&\"\\s]*)", "gi"),
+        (_match, rest: string) => buildReplacement(rest),
+      );
+    }
+
+    return result;
+  }
+
+  /**
+   * Copy an entire directory tree from the source tree into the IAR project
+   * using the same `src/<relative>` layout as all other source files.
+   * Files that live under the BSP tree are redirected to `bspDir` when provided.
+   */
+  private async copyDirToProject(
+    absDirPath: string,
+    projDir: string,
+    copied: Set<string>,
+    bspDir?: string,
+  ): Promise<void> {
+    if (!this.isUnderSourceDir(absDirPath)) return;
+    let entries: Dirent[];
+    try {
+      entries = await fs.readdir(absDirPath, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const absChild = path.join(absDirPath, entry.name);
+      if (entry.isDirectory()) {
+        await this.copyDirToProject(absChild, projDir, copied, bspDir);
+      } else {
+        const relPath = this.computeProjectRelPath(absChild);
+        const isBsp = bspDir !== undefined && this.isBspPath(absChild);
+        const targetDir = isBsp ? bspDir : projDir;
+        const destAbs = path.join(targetDir, relPath);
+        if (copied.has(destAbs)) continue;
+        copied.add(destAbs);
+        try {
+          await fs.mkdir(path.dirname(destAbs), { recursive: true });
+          await fs.copyFile(absChild, destAbs);
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+        }
+      }
+    }
+  }
+
+  /**
    * Recursively copies every file in an asset directory into the IAR project
    * (destination determined by computeProjectRelPath).
    * Does NOT add entries to the .ewp file list — only cmake-listed sources
@@ -713,6 +936,8 @@ export class IarGenerator {
     projDir: string,
     copied: Set<string>,
     files: IarFileEntry[],
+    destDir?: string,
+    ewpPrefix?: string,
   ): Promise<void> {
     let entries: Dirent[];
     try {
@@ -720,19 +945,21 @@ export class IarGenerator {
     } catch {
       return;
     }
+    const fileBase = destDir ?? projDir;
+    const prefix = ewpPrefix ?? "";
     for (const entry of entries) {
       const absEntry = path.join(absDir, entry.name);
       if (entry.isDirectory()) {
-        await this.copyHeadersRecursive(absEntry, projDir, copied, files);
+        await this.copyHeadersRecursive(absEntry, projDir, copied, files, destDir, ewpPrefix);
       } else if (HEADER_EXTS.has(path.extname(entry.name).toLowerCase())) {
         const relPath = this.computeProjectRelPath(absEntry);
-        const destAbs = path.join(projDir, relPath);
+        const destAbs = path.join(fileBase, relPath);
         if (copied.has(destAbs)) continue;
         copied.add(destAbs);
         try {
           await fs.mkdir(path.dirname(destAbs), { recursive: true });
           await fs.copyFile(absEntry, destAbs);
-          files.push({ projectRelPath: relPath, group: "Header Files" });
+          files.push({ projectRelPath: `${prefix}${relPath}`, group: "Header Files" });
         } catch (err) {
           if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
         }

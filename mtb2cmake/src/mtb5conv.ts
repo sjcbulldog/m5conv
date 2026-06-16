@@ -686,7 +686,35 @@ export class MTB5Converter {
                 this.logger_.error(msg) ;
                 throw new Error(msg) ;
             }
-            return tc === 'IAR' ? applyIarFiltering(flags) : flags ;
+            if (tc === 'IAR') return applyIarFiltering(flags) ;
+            if (tc === 'ARM') {
+                // MTB generates .asflags (armclang-format) and .asflags_s (armasm-format).
+                // Since armasm is the assembler, replace the asm flags with .asflags_s.
+                const replaceAsmFlagsFromSFile = (flagFile: string | undefined) : { flags: string[], file: string | undefined } => {
+                    if (!flagFile) return { flags: [], file: undefined } ;
+                    const sFile = flagFile.replace(/\.asflags$/, '.asflags_s') ;
+                    if (!fs.existsSync(sFile)) return { flags: [], file: undefined } ;
+                    const raw = fs.readFileSync(sFile, 'utf-8').trim().split(/\s+/).filter(t => t.length > 0) ;
+                    // armasm does not support -D (defines) or -I (includes); strip them.
+                    const tokens: string[] = [] ;
+                    for (let i = 0; i < raw.length; i++) {
+                        const t = raw[i] ;
+                        if (t === '-D' || t === '-I') { i++ ; continue ; } // two-token form
+                        if (t.startsWith('-D') || t.startsWith('-I')) continue ; // single-token form
+                        tokens.push(t) ;
+                    }
+                    return { flags: tokens, file: sFile } ;
+                } ;
+                const dbg = replaceAsmFlagsFromSFile(flags.asm.debugFile) ;
+                const rel = replaceAsmFlagsFromSFile(flags.asm.releaseFile) ;
+                flags.asm = {
+                    debug:       dbg.flags,
+                    release:     rel.flags,
+                    debugFile:   dbg.file,
+                    releaseFile: rel.file,
+                } ;
+            }
+            return flags ;
         } ;
 
         for (const toolchain of TOOLCHAINS) {

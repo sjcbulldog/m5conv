@@ -174,15 +174,18 @@
             "Source/portable/COMPONENT_CM0/TOOLCHAIN_GCC_ARM",
             "Source/portable/COMPONENT_CM0/TOOLCHAIN_LLVM_ARM",          
             "Source/portable/COMPONENT_CM0/TOOLCHAIN_IAR",
+            "Source/portable/COMPONENT_CM0/TOOLCHAIN_ARM",
 
             "Source/portable/COMPONENT_CM4",            
             "Source/portable/COMPONENT_CM4/TOOLCHAIN_GCC_ARM",
             "Source/portable/COMPONENT_CM4/TOOLCHAIN_LLVM_ARM",               
             "Source/portable/COMPONENT_CM4/TOOLCHAIN_IAR",
+            "Source/portable/COMPONENT_CM4/TOOLCHAIN_ARM",
 
             "Source/portable/COMPONENT_CM7",              
             "Source/portable/COMPONENT_CM7/TOOLCHAIN_GCC_ARM",           
-            "Source/portable/COMPONENT_CM7/TOOLCHAIN_LLVM_ARM",     
+            "Source/portable/COMPONENT_CM7/TOOLCHAIN_LLVM_ARM",
+            "source/portable/COMPONENT_CM7/ToOLCHAIN_ARM",
             "Source/portable/COMPONENT_CM7/TOOLCHAIN_IAR",
 
             "Source/portable/COMPONENT_CM33",
@@ -192,11 +195,14 @@
             "Source/portable/COMPONENT_CM33/TOOLCHAIN_LLVM_ARM/COMPONENT_FREERTOS_TZ",
             "Source/portable/COMPONENT_CM33/TOOLCHAIN_IAR/COMPONENT_FREERTOS_NTZ",
             "Source/portable/COMPONENT_CM33/TOOLCHAIN_IAR/COMPONENT_FREERTOS_TZ",
+            "Source/portable/COMPONENT_CM33/TOOLCHAIN_ARM/COMPONENT_FREERTOS_NTZ",
+            "Source/portable/COMPONENT_CM33/TOOLCHAIN_ARM/COMPONENT_FREERTOS_TZ",
 
             "Source/portable/COMPONENT_CM55",                 
             "Source/portable/COMPONENT_CM55/TOOLCHAIN_GCC_ARM",            
             "Source/portable/COMPONENT_CM55/TOOLCHAIN_LLVM_ARM",
-            "Source/portable/COMPONENT_CM55/TOOLCHAIN_IAR"
+            "Source/portable/COMPONENT_CM55/TOOLCHAIN_IAR",
+            "Source/portable/COMPONENT_CM55/TOOLCHAIN_ARM"
         ],
         "imports" : [
             "clib-support",

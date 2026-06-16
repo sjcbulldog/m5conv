@@ -57,6 +57,10 @@ export interface IarEwpInput {
    * When set, configures IlinkTrustzoneImportLibraryOut instead of placing
    * the flag in extra options (which would conflict with IAR's native setting). */
   cmseLibOut?: string;
+  /** Resolved $PROJ_DIR$-relative path of the CMSE import library produced by
+   * the paired secure project (--import_cmse_lib_in).  When set, the library
+   * is added to IlinkAdditionalLibs so the non-secure project links it. */
+  cmseLibIn?: string;
 }
 
 interface FileTree {
@@ -324,7 +328,7 @@ function aarmSettings(defines: string[], includes: string[]): string {
   ].join("\n");
 }
 
-function ilinkSettings(outputFile: string, extraLinkFlags: string[] = [], icfFile?: string, cmseLibOut?: string): string {
+function ilinkSettings(outputFile: string, extraLinkFlags: string[] = [], icfFile?: string, cmseLibOut?: string, cmseLibIn?: string): string {
   const opts: IarOption[] = [
     { name: "IlinkOutputFile", states: [outputFile] },
     { name: "IlinkLibIOConfig", states: ["1"] },
@@ -356,7 +360,7 @@ function ilinkSettings(outputFile: string, extraLinkFlags: string[] = [], icfFil
     { name: "IlinkExtraOptions", states: extraLinkFlags.length > 0 ? extraLinkFlags : [""] },
     { name: "IlinkLowLevelInterfaceSlave", states: ["1"] },
     { name: "IlinkAutoLibEnable", states: ["1"] },
-    { name: "IlinkAdditionalLibs", states: [""] },
+    { name: "IlinkAdditionalLibs", states: [cmseLibIn ?? ""] },
     { name: "IlinkOverrideProgramEntryLabel", states: ["0"] },
     { name: "IlinkProgramEntryLabelSelect", states: ["0"] },
     { name: "IlinkProgramEntryLabel", states: ["__iar_program_start"] },
@@ -527,10 +531,10 @@ export function renderEwp(input: IarEwpInput): string {
     "    <debug>1</debug>",
     generalSettings(input),
     iccarmSettings(input.defines, input.includePaths),
-    aarmSettings(input.defines, input.includePaths),
+    aarmSettings(input.defines.filter((d) => !d.includes("=")), input.includePaths),
     objcopySettings(input.generateHex ? `${input.projectName}.hex` : undefined),
     customSettings(),
-    ilinkSettings(input.outputFile, input.extraLinkFlags ?? [], input.icfFile, input.cmseLibOut),
+    ilinkSettings(input.outputFile, input.extraLinkFlags ?? [], input.icfFile, input.cmseLibOut, input.cmseLibIn),
     iarchiveSettings(),
     buildactionSettings(input.buildActionCommand),
     "  </configuration>",

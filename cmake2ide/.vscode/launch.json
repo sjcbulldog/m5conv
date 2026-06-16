@@ -11,7 +11,7 @@
       "args" : [
         "--force", 
         "--input", "C:/mtb5/edge/${input:mtbProjectName}", 
-        "--iar", "C:/iar/${input:mtbProjectName}"
+        "--iar", "C:/iar/edge/${input:mtbProjectName}"
       ],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
@@ -26,8 +26,8 @@
       "program": "${workspaceFolder}/src/index.ts",
       "args" : [
         "--force", 
-        "--input", "C:/sdk/mtb5/${input:mtbProjectName}", 
-        "--eclipse", "C:/sdk/eclipse/${input:mtbProjectName}"
+        "--input", "C:/mtb5/edge/${input:mtbProjectName}", 
+        "--eclipse", "C:/eclipse/edge/${input:mtbProjectName}"
       ],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
