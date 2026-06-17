@@ -572,10 +572,18 @@ function parseFlags(content: string, isLink: boolean) : { flags: string[], hasCm
 // veneer object file, which is written to the secure project's source
 // directory so its path stays stable across clean rebuilds.
 //
+// In the original ModusToolbox build, the .ldlibs file contains paths like
+// "../proj_cm33_s/nsc_veneer.o.tmp" because the linker produces the temporary
+// file directly in the source tree.  In the CMake build, a custom command
+// copies the temporary file to remove the .tmp extension (nsc_veneer.o), so
+// we rewrite the path here to match the final location.
+//
 function fixLdLibPath(token: string) : string {
     if (!/^\.\.\//.test(token)) return token ;
+    // Strip .tmp extension from veneer files (e.g. nsc_veneer.o.tmp -> nsc_veneer.o)
+    const pathWithoutTmp = token.replace(/\.tmp$/, '') ;
     const srcVar = '${CMAKE_CURRENT_SOURCE_DIR}' ;
-    return `${srcVar}/${token}` ;
+    return `${srcVar}/${pathWithoutTmp}` ;
 }
 
 //
@@ -2255,17 +2263,15 @@ export function generateProjectCMakeLists(
 
     if (cmseToolchains.length > 0) {
         lines.push('') ;
-        // GCC/LLVM/IAR write the veneer temp file to the binary directory.
-        // armlink on Windows consistently fails with EINVAL when given an absolute
-        // path to --import-cmse-lib-out, regardless of format.  MTB's own .ldflags
-        // uses a *relative* path (e.g. ../proj_cm33_s/nsc_veneer.o.tmp), and
-        // armlink accepts that.  Ninja runs commands from CMAKE_BINARY_DIR, so we
-        // compute a relative path from there to the source-dir veneer location.
-        lines.push('set(NSC_VENEER_TMP     ${CMAKE_CURRENT_BINARY_DIR}/nsc_veneer.o.tmp)') ;
-        lines.push('# Relative path from CMAKE_BINARY_DIR (Ninja CWD) to the veneer tmp file.') ;
-        lines.push('file(RELATIVE_PATH NSC_VENEER_TMP_ARM "${CMAKE_BINARY_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/nsc_veneer.o.tmp")') ;
-        lines.push('set(NSC_VENEER_TMP_ARM_ABS ${CMAKE_CURRENT_SOURCE_DIR}/nsc_veneer.o.tmp)') ;
+        // All compilers write the veneer temp file to the secure project's source directory
+        // so its path remains stable across clean rebuilds.  The linker outputs to this
+        // location, and a custom command copies it to the final nsc_veneer.o (removing
+        // the .tmp extension) only when changed.
+        lines.push('set(NSC_VENEER_TMP     ${CMAKE_CURRENT_SOURCE_DIR}/nsc_veneer.o.tmp)') ;
         lines.push('set(NSC_VENEER_PATH    ${CMAKE_CURRENT_SOURCE_DIR}/nsc_veneer.o)') ;
+        lines.push('# Relative path from CMAKE_BINARY_DIR (Ninja CWD) for ARM linker which') ;
+        lines.push('# rejects absolute paths with EINVAL on Windows.') ;
+        lines.push('file(RELATIVE_PATH NSC_VENEER_TMP_REL "${CMAKE_BINARY_DIR}" "${NSC_VENEER_TMP}")') ;
         lines.push('') ;
 
         // Emit veneer link flags per toolchain family.
@@ -2273,7 +2279,7 @@ export function generateProjectCMakeLists(
         const hasIar   = cmseToolchains.includes('IAR') ;
         const hasArm   = cmseToolchains.includes('ARM') ;
 
-        interface CmseBlock { condition: string ; flags: string[] ; tmpVar: string }
+        interface CmseBlock { condition: string ; flags: string[] }
         const cmseBlocks: CmseBlock[] = [] ;
         if (gnuCmse.length > 0) {
             cmseBlocks.push({
@@ -2282,7 +2288,6 @@ export function generateProjectCMakeLists(
                     '        -Wl,--cmse-implib',
                     '        -Wl,--out-implib=${NSC_VENEER_TMP}',
                 ],
-                tmpVar: 'NSC_VENEER_TMP',
             }) ;
         }
         if (hasIar) {
@@ -2292,19 +2297,16 @@ export function generateProjectCMakeLists(
                 flags: [
                     '        --import_cmse_lib_out=${NSC_VENEER_TMP}',
                 ],
-                tmpVar: 'NSC_VENEER_TMP',
             }) ;
         }
         if (hasArm) {
             cmseBlocks.push({
                 condition: 'MTBTOOLCHAIN STREQUAL "ARM"',
-                // Use relative path (mirrors MTB .ldflags); armlink rejects absolute
-                // paths with EINVAL on Windows for this flag.
+                // armlink rejects absolute paths with EINVAL on Windows; use relative path.
                 flags: [
                     '        --import-cmse-lib-out',
-                    '        ${NSC_VENEER_TMP_ARM}',
+                    '        ${NSC_VENEER_TMP_REL}',
                 ],
-                tmpVar: 'NSC_VENEER_TMP_ARM_ABS',
             }) ;
         }
         for (let bi = 0; bi < cmseBlocks.length; bi++) {
@@ -2316,16 +2318,9 @@ export function generateProjectCMakeLists(
         }
         if (cmseBlocks.length > 0) lines.push('endif()') ;
         lines.push('') ;
-        // Resolve the toolchain-specific temp path at configure time.
-        lines.push('if(MTBTOOLCHAIN STREQUAL "ARM")') ;
-        lines.push('    set(NSC_VENEER_TMP_ACTUAL ${NSC_VENEER_TMP_ARM_ABS})') ;
-        lines.push('else()') ;
-        lines.push('    set(NSC_VENEER_TMP_ACTUAL ${NSC_VENEER_TMP})') ;
-        lines.push('endif()') ;
-        lines.push('') ;
         lines.push('add_custom_command(') ;
         lines.push('    OUTPUT ${NSC_VENEER_PATH}') ;
-        lines.push('    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${NSC_VENEER_TMP_ACTUAL} ${NSC_VENEER_PATH}') ;
+        lines.push('    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${NSC_VENEER_TMP} ${NSC_VENEER_PATH}') ;
         lines.push('    DEPENDS $<TARGET_FILE:${APPNAME}>') ;
         lines.push('    COMMENT "Updating NSC veneer import library"') ;
         lines.push('    VERBATIM') ;

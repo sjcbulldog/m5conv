@@ -12,7 +12,7 @@
             "console": "integratedTerminal",
             "args": [
                 "--force",
-                "--target", "arm",
+                "--target", "gcc,iar,llvm,arm",
                 "--depends", "${workspaceFolder}/depends.json",
                 "--source", "c:/mtb/edge/${input:mtbProjectName}",
                 "--dest", "c:/mtb5/edge/${input:mtbProjectName}",
