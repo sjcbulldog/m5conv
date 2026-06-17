@@ -1,0 +1,49 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "npm: build",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "build"],
+      "group": "build",
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "npm: generate:assets",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "generate:assets"],
+      "problemMatcher": []
+    },
+    {
+      "label": "npm: generate:assets:custom",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "generate:assets", "--", "${input:assetsDir}"],
+      "problemMatcher": []
+    },
+    {
+      "label": "npm: dev:generate:assets",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "dev:generate:assets"],
+      "problemMatcher": []
+    },
+    {
+      "label": "npm: dev:generate:assets:custom",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "dev:generate:assets", "--", "${input:assetsDir}"],
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "assetsDir",
+      "type": "promptString",
+      "description": "Assets directory path (relative or absolute)",
+      "default": "assets"
+    }
+  ]
+}

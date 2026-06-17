@@ -1,0 +1,48 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug CLI (ts-node)",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "ts-node",
+        "${workspaceFolder}/src/index.ts"
+      ],
+      "args": [
+        "--input",
+        "C:/mtb5/edge",
+        "--bsps",
+        "KIT_PSE84_EVAL_EPC2,_KIT_PSE84_EVAL_EPC4,_KIT_PSE84_AI",
+        "--output",
+        "C:/sdks/edge"
+      ],
+      "cwd": "${workspaceFolder}",
+      "skipFiles": [
+        "<node_internals>/**"
+      ],
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Debug CLI (dist)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/dist/index.js",
+      "args": [
+        "--input",
+        "C:/mtb5/edge",
+        "--bsps",
+        "KIT_PSE84_EVAL_EPC2,_KIT_PSE84_EVAL_EPC4,_KIT_PSE84_AI",
+        "--output",
+        "C:/sdks/edge"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "npm: build",
+      "skipFiles": [
+        "<node_internals>/**"
+      ],
+      "console": "integratedTerminal"
+    }
+  ]
+}
