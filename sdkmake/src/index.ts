@@ -379,10 +379,11 @@ function upsertApplication(
     logger.info(`Merged BSPs into existing app ${app.appName}.`);
   }
 
+  sanitizeProjectAppInfoFiles(appOutputPath);
+
   copyAssetsForApplication(app, assetsOutDir, logger, stats);
   copyBspsForApplication(app, bspsOutDir, logger, stats);
 }
-
 function copyAppTemplateStripped(sourceAppPath: string, destAppPath: string): void {
   fs.mkdirSync(destAppPath, { recursive: true });
   const entries = fs.readdirSync(sourceAppPath, { withFileTypes: true });
@@ -426,6 +427,42 @@ function regenerateProjectFirmwareFiles(appPath: string): void {
     fs.rmSync(firmwarePath, { force: true });
     fs.writeFileSync(firmwarePath, firmwareContent, "utf8");
   }
+}
+
+function sanitizeProjectAppInfoFiles(appPath: string): void {
+  const rootAppInfoPath = path.join(appPath, "appinfo.cmake");
+  if (fs.existsSync(rootAppInfoPath)) {
+    sanitizeAppInfoFile(rootAppInfoPath);
+  }
+
+  const entries = fs.readdirSync(appPath, { withFileTypes: true });
+  for (const ent of entries) {
+    if (!ent.isDirectory()) {
+      continue;
+    }
+
+    const projectAppInfoPath = path.join(appPath, ent.name, "appinfo.cmake");
+    if (fs.existsSync(projectAppInfoPath)) {
+      sanitizeAppInfoFile(projectAppInfoPath);
+    }
+  }
+}
+
+function sanitizeAppInfoFile(appInfoPath: string): void {
+  const original = fs.readFileSync(appInfoPath, "utf8");
+  const sanitized = removeDeviceAndBspPathSetLines(original);
+  if (sanitized !== original) {
+    fs.writeFileSync(appInfoPath, sanitized, "utf8");
+  }
+}
+
+function removeDeviceAndBspPathSetLines(content: string): string {
+  const lineEnding = content.includes("\r\n") ? "\r\n" : "\n";
+  const hadTrailingNewline = content.endsWith("\n");
+  const lines = content.split(/\r?\n/);
+  const filtered = lines.filter((line) => !/^\s*set\s*\(\s*(MTBDEVICE|MTBDEVICELIST|BSPPATH)\b/.test(line));
+  const result = filtered.join(lineEnding);
+  return hadTrailingNewline ? result + lineEnding : result;
 }
 
 function writeDescJson(appOutputPath: string, metadata: AppMetadata): void {
@@ -542,16 +579,21 @@ function copyBspsForApplication(app: InputAppInfo, bspsOutDir: string, logger: L
     }
 
     const srcDirName = path.basename(src);
-    const dst = path.join(bspsOutDir, srcDirName);
+    const dstDirName = stripTargetAppPrefix(srcDirName);
+    const dst = path.join(bspsOutDir, dstDirName);
     if (fs.existsSync(dst)) {
       stats.bspsSkipped += 1;
-      logger.verbose(`BSP already present, skipping copy: ${srcDirName}`);
+      logger.verbose(`BSP already present, skipping copy: ${dstDirName}`);
       continue;
     }
     fs.cpSync(src, dst, { recursive: true });
     stats.bspsCopied += 1;
-    logger.verbose(`Copied BSP: ${srcDirName}`);
+    logger.verbose(`Copied BSP: ${dstDirName}`);
   }
+}
+
+function stripTargetAppPrefix(name: string): string {
+  return name.replace(/^TARGET_APP_?/, "");
 }
 
 function createEmptyStats(): RunStats {

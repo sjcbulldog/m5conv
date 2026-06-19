@@ -134,13 +134,24 @@ function stripJsonComments(text: string) : string {
 //
 // Load the depends.json database from the given file path.
 // Supports JSON with single-line and multi-line comments.
+// Deduplicates entries by asset name, keeping the last occurrence.
 //
 export function loadDependsDB(filePath: string) : DependsEntry[] {
     if (!fs.existsSync(filePath)) {
         return [] ;
     }
     const data = fs.readFileSync(filePath, 'utf-8') ;
-    return JSON.parse(stripJsonComments(data)) as DependsEntry[] ;
+    const entries = JSON.parse(stripJsonComments(data)) as DependsEntry[] ;
+    
+    // Deduplicate by asset name, keeping the last occurrence of each asset.
+    // This allows later entries to override earlier ones, useful for refined
+    // asset definitions with more complete dependency information.
+    const lastIndex = new Map<string, number>() ;
+    for (let i = 0; i < entries.length; i++) {
+        lastIndex.set(entries[i].name, i) ;
+    }
+    
+    return entries.filter((_, i) => lastIndex.get(entries[i].name) === i) ;
 }
 
 export function loadCompileOptionsDB(filePath: string) : Record<string, CompileOptionsEntry> {
@@ -937,7 +948,9 @@ export function resolveIncludeDirs(
             const depEntry = dependsDB.find(e => e.name === imp.name) ;
             if (depEntry) {
                 for (const exp of depEntry.exports) {
-                    const dir = `${assetsBaseDir}/${imp.name}/${exp}` ;
+                    // Normalize export path: if it's ".", don't append it to the asset path
+                    const expPath = exp === '.' ? '' : `/${exp}` ;
+                    const dir = `${assetsBaseDir}/${imp.name}${expPath}` ;
                     const conditions = [componentCondition, ...extractPathConditions(exp)] ;
                     includeDirs.push({ path: dir, conditions }) ;
                 }
@@ -961,7 +974,9 @@ export function resolveIncludeDirs(
         const depEntry = dependsDB.find(e => e.name === imp) ;
         if (depEntry) {
             for (const exp of depEntry.exports) {
-                const dir = `${assetsBaseDir}/${imp}/${exp}` ;
+                // Normalize export path: if it's ".", don't append it to the asset path
+                const expPath = exp === '.' ? '' : `/${exp}` ;
+                const dir = `${assetsBaseDir}/${imp}${expPath}` ;
                 includeDirs.push({ path: dir, conditions: extractPathConditions(exp) }) ;
             }
         }
@@ -988,7 +1003,9 @@ export function resolveAssetExports(
 
     const includeDirs: ConditionalIncludeDir[] = [] ;
     for (const exp of entry.exports) {
-        const dir = `${assetsBaseDir}/${assetName}/${exp}` ;
+        // Normalize export path: if it's ".", don't append it to the asset path
+        const expPath = exp === '.' ? '' : `/${exp}` ;
+        const dir = `${assetsBaseDir}/${assetName}${expPath}` ;
         includeDirs.push({ path: dir, conditions: extractPathConditions(exp) }) ;
     }
     return includeDirs ;

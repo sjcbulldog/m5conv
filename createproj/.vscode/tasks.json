@@ -1,0 +1,40 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "npm: install",
+      "type": "shell",
+      "command": "npm",
+      "args": ["install"],
+      "group": "none",
+      "problemMatcher": []
+    },
+    {
+      "label": "npm: build",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "build"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "createproj: run sample",
+      "type": "shell",
+      "command": "node",
+      "args": [
+        "dist/cli.js",
+        "--sdk",
+        "C:/sdks/edge",
+        "--bsp",
+        "MY_BSP",
+        "--dest",
+        "C:/m5conv/output/new-app"
+      ],
+      "dependsOn": "npm: build",
+      "problemMatcher": []
+    }
+  ]
+}

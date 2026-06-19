@@ -1,0 +1,61 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "mtb3create: Debug current build",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/dist/index.js",
+      "args": [
+        "--bsp",
+        "KIT_PSE84_EVAL_EPC2",
+        "--dest",
+        "c:/sdk4/mtb3",
+        "--creator",
+        "C:/users/GriffinButch/ModusToolbox/tools_3.8/project-creator/project-creator-cli.exe"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
+    },
+    {
+      "name": "mtb3create: Debug current build (--force)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/dist/index.js",
+      "args": [
+        "--bsp",
+        "KIT_PSE84_EVAL_EPC2",
+        "--dest",
+        "c:/sdk4/mtb3",
+        "--creator",
+        "C:/users/GriffinButch/ModusToolbox/tools_3.8/project-creator/project-creator-cli.exe",
+        "--force"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
+    },
+    {
+      "name": "mtb3create: Help",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/dist/index.js",
+      "args": [
+        "--help"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "name": "mtb3create",
+  "version": "1.0.0",
+  "description": "Create all ModusToolbox examples for BSPs",
+  "main": "dist/index.js",
+  "bin": {
+    "mtb3create": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js"
+  },
+  "keywords": [
+    "modustoolbox",
+    "cli",
+    "bsp"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^24.0.12",
+    "typescript": "^5.9.2"
+  }
+}

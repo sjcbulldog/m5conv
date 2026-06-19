@@ -14,8 +14,8 @@
                 "--force",
                 "--target", "gcc,iar,llvm,arm",
                 "--depends", "${workspaceFolder}/depends.json",
-                "--source", "c:/mtb/edge/${input:mtbProjectName}",
-                "--dest", "c:/mtb5/edge/${input:mtbProjectName}",
+                "--source", "c:/sdk4/mtb3/${input:mtbProjectName}",
+                "--dest", "c:/sdk4/mtb4/${input:mtbProjectName}",
             ]
         }
     ],

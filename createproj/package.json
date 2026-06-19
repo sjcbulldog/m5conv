@@ -1,0 +1,23 @@
+{
+  "name": "createproj",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TypeScript CLI utility to create an application from an SDK",
+  "type": "commonjs",
+  "bin": {
+    "createproj": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/cli.js",
+    "dev": "ts-node src/cli.ts"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.2"
+  }
+}

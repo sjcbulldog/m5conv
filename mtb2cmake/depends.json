@@ -1107,7 +1107,7 @@
     {
         "name" : "BMI270_SensorAPI",
         "exports" : [
-            "include"
+            "."
         ],
         "imports" : [
             "core-lib",
@@ -1737,9 +1737,10 @@
     {
         "name" : "sensor-motion-bmi270",
         "exports" : [
-            "include"
+            "."
         ],
         "imports" : [
+            "BMI270_SensorAPI",
             "core-lib",
             "cmsis",
             "mtb-dsl-pse8xxgp",
