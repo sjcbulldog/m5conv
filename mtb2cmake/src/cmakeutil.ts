@@ -1600,7 +1600,7 @@ export function generateBspCMakeInclude(
     lines.push('# Set BSP_TARGET to the target to add sources to before including.') ;
     lines.push('# Set BSP_DIR to the path of this BSP directory.') ;
     lines.push('#') ;
-    lines.push('') ;
+    lines.push('')
 
     // Unconditional sources
     if (unconditional.length > 0) {
@@ -1850,6 +1850,7 @@ export interface AssetSubdirectory {
     name: string ;
     relativePath: string ;
     targetName: string ;
+    bspName?: string ;  // Set when this asset originates from the BSP's deps directory
 }
 
 //
@@ -1976,10 +1977,35 @@ export function generateFirmwareCMake(
     if (assets.length > 0) {
         lines.push('set(PROJECTDIR ${CMAKE_CURRENT_SOURCE_DIR})') ;
         lines.push('') ;
-        for (const asset of assets) {
+
+        const unconditional = assets.filter(a => !a.bspName) ;
+        const bspConditional = assets.filter(a => a.bspName) ;
+
+        for (const asset of unconditional) {
             lines.push(`set(MTB5_ASSET_LIBRARY_NAME ${asset.targetName})`) ;
             lines.push(`add_subdirectory(${asset.relativePath} \${CMAKE_BINARY_DIR}/${projectName}/${asset.name})`) ;
             lines.push('unset(MTB5_ASSET_LIBRARY_NAME)') ;
+        }
+
+        // Group BSP-sourced assets by BSP name and emit inside if(MTBBSP STREQUAL "...") guards.
+        const bspGroups = new Map<string, AssetSubdirectory[]>() ;
+        for (const asset of bspConditional) {
+            const key = asset.bspName! ;
+            if (!bspGroups.has(key)) {
+                bspGroups.set(key, []) ;
+            }
+            bspGroups.get(key)!.push(asset) ;
+        }
+
+        for (const [bsp, group] of bspGroups) {
+            lines.push('') ;
+            lines.push(`if(MTBBSP STREQUAL "${bsp}")`) ;
+            for (const asset of group) {
+                lines.push(`    set(MTB5_ASSET_LIBRARY_NAME ${asset.targetName})`) ;
+                lines.push(`    add_subdirectory(${asset.relativePath} \${CMAKE_BINARY_DIR}/${projectName}/${asset.name})`) ;
+                lines.push('    unset(MTB5_ASSET_LIBRARY_NAME)') ;
+            }
+            lines.push(`endif() # MTBBSP STREQUAL "${bsp}"`) ;
         }
     }
 
@@ -2216,11 +2242,11 @@ export function generateProjectCMakeLists(
         lines.push('') ;
     }
 
-    // Set BSP_DIR— can be overridden from the command line:
-    //   cmake -DBSP_DIR=/path/to/bsp ...
+    // Set BSP_DIR from BSPPATH (defined in appinfo.cmake) — can be overridden on the
+    // command line with -DBSP_DIR=... or by overriding MTBBSP.
     if (bspName) {
         lines.push('if(NOT DEFINED BSP_DIR)') ;
-        lines.push(`    set(BSP_DIR \${CMAKE_CURRENT_SOURCE_DIR}/../bsps/${bspName})`) ;
+        lines.push('    set(BSP_DIR ${BSPPATH})') ;
         lines.push('endif()') ;
         lines.push('') ;
     }
@@ -2644,37 +2670,38 @@ export function processSignCombineJson(
 
 //
 // Generate appinfo.cmake at the application root level.
-// This file contains MTBDEVICE and MTBDEVICELIST, defined once for the entire
-// application.  The top-level CMakeLists.txt includes this file.
+// This file contains the project list, BSP name/path, and sign-combine symbols.
 // Component set statements and their derived defines live in each project's
 // projinfo.cmake instead (see generateProjInfoCMake).
 //
 export function generateAppInfoCMake(
     destDir: string,
-    device: string,
-    deviceList: string[],
+    projectNames: string[],
     bspName?: string,
     signCombineInfo?: SignCombineInfo,
     setOverrides: Map<string, string> = new Map()
 ) : void {
     const lines: string[] = [] ;
 
-    // Primary target device: MCU part number used by ModusToolbox BSP-generated code
-    // and tools to select device-specific configuration (clocks, memory maps, etc.).
-    lines.push(`set(MTBDEVICE ${device})`) ;
+    // List of all projects in the application, in build order (secure before non-secure).
+    // The top-level CMakeLists.txt iterates this variable to add each project via
+    // add_subdirectory().
+    lines.push(`set(MTB_PROJECTS ${projectNames.join(' ')})`) ;
+    lines.push('') ;
 
-    // Full device list: includes the primary device plus any additional MCUs declared
-    // via MTB_ADDITIONAL_DEVICES.  Tools that need to know every core in a multi-core
-    // design (e.g. multi-image programming scripts) consume this list.
-    lines.push(`set(MTBDEVICELIST ${deviceList.join(' ')})`) ;
+    if (bspName) {
+        lines.push('') ;
+
+        // Active BSP name and full path — MTBBSP can be overridden on the cmake command
+        // line (e.g. -DMTBBSP=TARGET_OTHER_BSP); BSPPATH is always derived from MTBBSP.
+        lines.push('if(NOT DEFINED MTBBSP)') ;
+        lines.push(`    set(MTBBSP ${bspName})`) ;
+        lines.push('endif()') ;
+        lines.push('set(BSPPATH ${CMAKE_SOURCE_DIR}/bsps/${MTBBSP})') ;
+    }
 
     if (bspName && signCombineInfo) {
         lines.push('') ;
-
-        // Path to the selected Board Support Package directory.  edgeprotecttools (EPT)
-        // uses this as its symbol-search root when resolving relative file references
-        // inside the sign-combine JSON configuration.
-        lines.push(`set(BSPPATH \${CMAKE_SOURCE_DIR}/bsps/${bspName})`) ;
 
         for (const sym of signCombineInfo.symbols) {
             const value = setOverrides.has(sym.symbolName)
@@ -2759,7 +2786,7 @@ export function generateTopLevelCMakeLists(
     signCombineInfo?: SignCombineInfo,
     setOverrides: Map<string, string> = new Map(),
     cmseProjects: Set<string> = new Set()
-) : void {
+) : string[] {
     const lines: string[] = [] ;
     lines.push('cmake_minimum_required(VERSION 3.21)') ;
     lines.push(`project(${path.basename(destDir)})`) ;
@@ -2780,9 +2807,9 @@ export function generateTopLevelCMakeLists(
         return a.localeCompare(b) ;
     }) ;
 
-    for (const proj of sorted) {
-        lines.push(`add_subdirectory(${proj})`) ;
-    }
+    lines.push('foreach(proj ${MTB_PROJECTS})') ;
+    lines.push('    add_subdirectory(${proj})') ;
+    lines.push('endforeach()') ;
 
     // For each _ns project that has a matching _s project, declare the
     // build-order dependency so CMake builds _s before _ns.
@@ -2810,15 +2837,11 @@ export function generateTopLevelCMakeLists(
     }
 
     lines.push('') ;
+    lines.push('include(mtb.cmake)') ;
+    lines.push('') ;
 
     if (bspName && signCombineInfo) {
-        // --- EPT sign-combine section ---
-        lines.push('find_program(EPT edgeprotecttools.exe)') ;
-        lines.push('if ("${EPT}" STREQUAL "EPT-NOTFOUND")') ;
-        lines.push('    message(FATAL_ERROR "Could not find program edgeprotecttools")') ;
-        lines.push('endif()') ;
-        lines.push('message(STATUS "Found edgeprotecttools: ${EPT}")') ;
-        lines.push('') ;
+        // --- Application-specific EPT sign-combine recipe ---
         const outputVar = `\${${signCombineInfo.outputSymbolName}}` ;
         const setArgs = signCombineInfo.symbols
             .map(s => `--set ${s.symbolName} \${${s.symbolName}}`)
@@ -2843,6 +2866,35 @@ export function generateTopLevelCMakeLists(
 
     const cmakePath = path.join(destDir, 'CMakeLists.txt') ;
     fs.writeFileSync(cmakePath, lines.join('\n')) ;
+    return sorted ;
+}
+
+//
+// Generate mtb.cmake at the application root level.
+// Contains reusable ModusToolbox cmake utilities that are identical across all
+// applications.  Currently emits the find_program guard for edgeprotecttools
+// (EPT) when a sign-combine configuration is present, so that the application-
+// specific sign-combine recipe in CMakeLists.txt can reference ${EPT}.
+// The top-level CMakeLists.txt unconditionally includes this file.
+//
+export function generateMtbCMake(
+    destDir: string,
+    bspName?: string,
+    signCombineInfo?: SignCombineInfo
+) : void {
+    const lines: string[] = [] ;
+
+    if (bspName && signCombineInfo) {
+        lines.push('find_program(EPT edgeprotecttools.exe)') ;
+        lines.push('if ("${EPT}" STREQUAL "EPT-NOTFOUND")') ;
+        lines.push('    message(FATAL_ERROR "Could not find program edgeprotecttools")') ;
+        lines.push('endif()') ;
+        lines.push('message(STATUS "Found edgeprotecttools: ${EPT}")') ;
+        lines.push('') ;
+    }
+
+    const mtbPath = path.join(destDir, 'mtb.cmake') ;
+    fs.writeFileSync(mtbPath, lines.join('\n')) ;
 }
 
 //

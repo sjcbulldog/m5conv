@@ -14,12 +14,17 @@
                 "--force",
                 "--target", "gcc,iar,llvm,arm",
                 "--depends", "${workspaceFolder}/depends.json",
-                "--source", "c:/sdk4/mtb3/${input:mtbProjectName}",
-                "--dest", "c:/sdk4/mtb4/${input:mtbProjectName}",
+                "--source", "c:/sdk4/mtb3/${input:bspName}/${input:mtbProjectName}",
+                "--dest", "c:/sdk4/mtb4/${input:bspName}/${input:mtbProjectName}",
             ]
         }
     ],
     "inputs": [
+        {   "id" : "bspName",
+            "type" : "promptString",
+            "description" : "The BSP name",
+            "default" : "KIT_PSE84_EVAL_EPC2"
+        },
         {
             "id" : "mtbProjectName",
             "type" : "promptString",

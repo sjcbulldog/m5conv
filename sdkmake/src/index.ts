@@ -23,6 +23,7 @@ type InputAppInfo = {
   projectAssets: Record<string, string[]>;
   appBsps: string[];
   bspDirByName: Map<string, string>;
+  bspAssets: Set<string>;
 };
 
 type RunStats = {
@@ -187,6 +188,25 @@ function prepareOutputDirectory(outputDir: string, force: boolean, logger: Logge
   fs.mkdirSync(outputDir, { recursive: true });
 }
 
+function findMtb4AppDirectories(dir: string): string[] {
+  const results: string[] = [];
+  const mtbCmakePath = path.join(dir, "mtb.cmake");
+  if (fs.existsSync(mtbCmakePath) && fs.statSync(mtbCmakePath).isFile()) {
+    results.push(dir);
+    return results;
+  }
+
+  for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (ent.isDirectory()) {
+      const found = findMtb4AppDirectories(path.join(dir, ent.name));
+      for (const f of found) {
+        results.push(f);
+      }
+    }
+  }
+  return results;
+}
+
 function processApplications(opts: CliOptions, logger: Logger, stats: RunStats): void {
   const appsOutDir = path.join(opts.outputDir, "apps");
   const assetsOutDir = path.join(opts.outputDir, "assets");
@@ -196,13 +216,10 @@ function processApplications(opts: CliOptions, logger: Logger, stats: RunStats):
   fs.mkdirSync(assetsOutDir, { recursive: true });
   fs.mkdirSync(bspsOutDir, { recursive: true });
 
-  const appDirs = fs
-    .readdirSync(opts.inputDir, { withFileTypes: true })
-    .filter((ent) => ent.isDirectory())
-    .map((ent) => path.join(opts.inputDir, ent.name));
+  const appDirs = findMtb4AppDirectories(opts.inputDir);
 
   if (appDirs.length === 0) {
-    throw new Error(`No application directories found in: ${opts.inputDir}`);
+    throw new Error(`No mtb4 application directories (containing mtb.cmake) found under: ${opts.inputDir}`);
   }
 
   logger.info(`Found ${appDirs.length} application(s) to process.`);
@@ -237,12 +254,20 @@ function analyzeInputApp(appDir: string): InputAppInfo {
     throw new Error(`Application has no BSPs in bsps/: ${appName}`);
   }
 
+  const bspAssets = new Set<string>();
+  for (const bspDir of bspDirByName.values()) {
+    for (const asset of readBspJsonAssets(bspDir)) {
+      bspAssets.add(asset);
+    }
+  }
+
   return {
     appName,
     appPath: appDir,
     projectAssets,
     appBsps: bspNames,
     bspDirByName,
+    bspAssets,
   };
 }
 
@@ -324,6 +349,38 @@ function discoverAppBsps(appDir: string): { bspNames: string[]; bspDirByName: Ma
   };
 }
 
+function readBspJsonAssets(bspDir: string): string[] {
+  const bspJsonPath = path.join(bspDir, "bsp.json");
+  if (!fs.existsSync(bspJsonPath)) {
+    return [];
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(bspJsonPath, "utf8"));
+  } catch {
+    throw new Error(`Invalid JSON in ${bspJsonPath}`);
+  }
+  if (!parsed || typeof parsed !== "object") {
+    return [];
+  }
+  const assets = (parsed as Record<string, unknown>).assets;
+  if (!Array.isArray(assets)) {
+    return [];
+  }
+  return assets.filter((a): a is string => typeof a === "string");
+}
+
+function filterBspAssetsFromProjects(
+  projectAssets: Record<string, string[]>,
+  bspAssets: Set<string>,
+): Record<string, string[]> {
+  const filtered: Record<string, string[]> = {};
+  for (const [projectName, assets] of Object.entries(projectAssets)) {
+    filtered[projectName] = assets.filter((a) => !bspAssets.has(a));
+  }
+  return filtered;
+}
+
 function validateAppBspsAgainstSelection(app: InputAppInfo, selectedBsps: string[]): void {
   const selected = new Set(selectedBsps);
   for (const appBsp of app.appBsps) {
@@ -345,7 +402,7 @@ function upsertApplication(
   const incomingMetadata: AppMetadata = {
     name: app.appName,
     bsps: [...app.appBsps].sort(),
-    projects: normalizeProjectsMap(app.projectAssets),
+    projects: normalizeProjectsMap(filterBspAssetsFromProjects(app.projectAssets, app.bspAssets)),
   };
 
   if (!fs.existsSync(appOutputPath)) {
@@ -360,19 +417,23 @@ function upsertApplication(
     }
 
     const existing = readDescJson(descPath);
-    assertProjectAssetsMatch(existing, incomingMetadata, app.appName);
+    const mergedProjects = mergeProjectsMetadata(existing, incomingMetadata, app.appName);
 
     const existingBsps = new Set(existing.bsps);
     const newBsps = incomingMetadata.bsps.filter((bsp) => !existingBsps.has(bsp));
 
-    if (newBsps.length === 0) {
-      throw new Error(`Application ${app.appName} already exists and does not add a new BSP`);
+    const hasNewAssets = Object.keys(mergedProjects).some(
+      (projectName) => mergedProjects[projectName].assets.length > existing.projects[projectName].assets.length,
+    );
+
+    if (newBsps.length === 0 && !hasNewAssets) {
+      throw new Error(`Application ${app.appName} already exists and does not add any new BSPs or assets`);
     }
 
     const merged: AppMetadata = {
       ...existing,
       bsps: [...new Set([...existing.bsps, ...incomingMetadata.bsps])].sort(),
-      projects: existing.projects,
+      projects: mergedProjects,
     };
     writeDescJson(appOutputPath, merged);
     stats.appsMerged += 1;
@@ -521,39 +582,34 @@ function readDescJson(descPath: string): AppMetadata {
   };
 }
 
-function assertProjectAssetsMatch(existing: AppMetadata, incoming: AppMetadata, appName: string): void {
+function mergeProjectsMetadata(
+  existing: AppMetadata,
+  incoming: AppMetadata,
+  appName: string,
+): Record<string, { assets: string[] }> {
   const existingProjects = Object.keys(existing.projects).sort();
   const incomingProjects = Object.keys(incoming.projects).sort();
 
   if (existingProjects.length !== incomingProjects.length || existingProjects.some((p, i) => p !== incomingProjects[i])) {
-    throw new Error(`Asset mismatch for app ${appName}: project sets differ`);
+    throw new Error(`Project structure mismatch for app ${appName}: project sets differ`);
   }
 
+  const merged: Record<string, { assets: string[] }> = {};
   for (const projectName of existingProjects) {
-    const existingAssets = [...existing.projects[projectName].assets].sort();
-    const incomingAssets = [...incoming.projects[projectName].assets].sort();
-
-    if (existingAssets.length !== incomingAssets.length) {
-      throw new Error(`Asset mismatch for app ${appName}, project ${projectName}: asset counts differ`);
-    }
-
-    for (let i = 0; i < existingAssets.length; i += 1) {
-      if (existingAssets[i] !== incomingAssets[i]) {
-        throw new Error(`Asset mismatch for app ${appName}, project ${projectName}: ${existingAssets[i]} != ${incomingAssets[i]}`);
-      }
-    }
+    const combined = uniqueInOrder([...existing.projects[projectName].assets, ...incoming.projects[projectName].assets]).sort();
+    merged[projectName] = { assets: combined };
   }
+  return merged;
 }
 
 function copyAssetsForApplication(app: InputAppInfo, assetsOutDir: string, logger: Logger, stats: RunStats): void {
-  const appAssetNames = uniqueInOrder(
-    Object.values(app.projectAssets)
-      .flat()
-      .filter((v) => v.length > 0),
-  );
+  const allAssetNames = uniqueInOrder([
+    ...Object.values(app.projectAssets).flat().filter((v) => v.length > 0),
+    ...app.bspAssets,
+  ]);
   const appAssetsDir = path.join(app.appPath, "assets");
 
-  for (const assetName of appAssetNames) {
+  for (const assetName of allAssetNames) {
     const src = path.join(appAssetsDir, assetName);
     if (!fs.existsSync(src) || !fs.statSync(src).isDirectory()) {
       throw new Error(`Missing asset directory in ${app.appName}: assets/${assetName}`);

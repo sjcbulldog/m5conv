@@ -119,7 +119,11 @@ discover projects, assets, and BSPs.
 #### Phase 2 — `copyBSPs()`
 * Scans `source/BSPs/TARGET_*/` directories.
 * Copies each BSP directory to `dest/bsps/TARGET_*/` (skipped in `--cmake-only` mode).
-* Calls `generateBspCMakeInclude()` to produce a `bsp.cmake` file alongside each BSP.
+* Scans the BSP's `deps/` subdirectory for `*.mtbx` files; parses each to extract the
+  referenced asset name (ignoring any `TARGET_*` entries).
+* Calls `generateBspCMakeInclude()` to produce a `bsp.cmake` file alongside each BSP,
+  passing the list of BSP dependency asset names so they are emitted as
+  `add_subdirectory` calls at the top of the file.
 
 #### Phase 3 — `copyAssets()`
 * Iterates the asset requests from each project's `MTBProjectInfo`.
@@ -210,7 +214,7 @@ A collection of pure functions that produce CMake source text.
 |---|---|
 | `generateObjectLibraryCMakeLists(dir, name, ...)` | `CMakeLists.txt` for a middleware asset as a CMake `OBJECT` library. |
 | `generateHeaderOnlyCMakeLists(dir, name, ...)` | `CMakeLists.txt` for a header-only asset using `add_custom_target`. |
-| `generateBspCMakeInclude(dir, sources, headers)` | `bsp.cmake` include file for a BSP directory. |
+| `generateBspCMakeInclude(dir, sources, headers, bspDeps)` | `bsp.cmake` include file for a BSP directory; `bspDeps` emits `add_subdirectory` calls for assets declared in the BSP's `deps/*.mtbx` files. |
 | `generateProjectCMakeLists(dir, name, ...)` | `CMakeLists.txt` for an application project; includes toolchain-conditional compile/link flags. |
 | `generateProjInfoCMake(dir, components)` | `projinfo.cmake` exposing the project's component list. |
 | `generateTopLevelCMakeLists(dest, projects, ...)` | Root `CMakeLists.txt` with `add_subdirectory` for each project and optional sign-combine steps. |

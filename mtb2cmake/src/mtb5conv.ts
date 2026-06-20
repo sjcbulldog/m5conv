@@ -1,5 +1,6 @@
 import { ModusToolboxEnvironment, MTBLoadFlags } from "./mtbenv";
-import { collectSources, collectHeaders, collectLibraries, collectProjectHeaderDirs, generateObjectLibraryCMakeLists, generateHeaderOnlyCMakeLists, generateLibraryAssetCMakeLists, generateProjectCMakeLists, generateTopLevelCMakeLists, generateAppInfoCMake, generateProjInfoCMake, generateGccToolchainCMake, generateIarToolchainCMake, generateLlvmToolchainCMake, generateArmToolchainCMake, generateBspCMakeInclude, generateCMakePresetsFile, generateVSCodeLaunchJson, generateVSCodeTasksJson, generateVSCodeSettingsJson, AssetSubdirectory, loadDependsDB, resolveIncludeDirs, resolveAssetExports, resolveAssetInternals, hasActiveSources, readProjectDefinesByConfig, readProjectDefinesForConfig, fixDefineFilePaths, readProjectFlagsByConfig, readProjectFlagsForConfig, mergeProjectFlagsByConfig, remapFlagPaths, ProjectFlagsByConfig, ProjectFlagsByToolchain, DependsEntry, ConditionalIncludeDir, processSignCombineJson, SignCombineInfo, generateWifiHostDriverResourceDefines } from './cmakeutil';
+import { collectSources, collectHeaders, collectLibraries, collectProjectHeaderDirs, generateObjectLibraryCMakeLists, generateHeaderOnlyCMakeLists, generateLibraryAssetCMakeLists, generateProjectCMakeLists, generateTopLevelCMakeLists, generateMtbCMake, generateAppInfoCMake, generateProjInfoCMake, generateGccToolchainCMake, generateIarToolchainCMake, generateLlvmToolchainCMake, generateArmToolchainCMake, generateBspCMakeInclude, generateCMakePresetsFile, generateVSCodeLaunchJson, generateVSCodeTasksJson, generateVSCodeSettingsJson, AssetSubdirectory, loadDependsDB, resolveIncludeDirs, resolveAssetExports, resolveAssetInternals, hasActiveSources, readProjectDefinesByConfig, readProjectDefinesForConfig, fixDefineFilePaths, readProjectFlagsByConfig, readProjectFlagsForConfig, mergeProjectFlagsByConfig, remapFlagPaths, ProjectFlagsByConfig, ProjectFlagsByToolchain, DependsEntry, ConditionalIncludeDir, processSignCombineJson, SignCombineInfo, generateWifiHostDriverResourceDefines } from './cmakeutil';
+import { MTBAssetRequest, MTBAssetStorageFormat } from './mtbenv/appdata/mtbassetreq';
 import { MTBUtils } from './mtbenv/misc/mtbutils';
 import * as winston from 'winston';
 import * as fs from 'fs';
@@ -22,6 +23,7 @@ async function copyDirTolerant(src: string, dest: string, skipped: string[] = []
         const destEntry = path.join(dest, entry.name) ;
         try {
             if (entry.isDirectory()) {
+                if (entry.name === 'build') continue ;
                 await copyDirTolerant(srcEntry, destEntry, skipped) ;
             } else {
                 await fs.promises.copyFile(srcEntry, destEntry) ;
@@ -186,7 +188,7 @@ export class MTB5Converter {
                 }
 
                 const assetName = req.name() ;
-                if (assetName === 'device-db') {
+                if (assetName === 'device-db' || assetName === 'core-make') {
                     continue ;
                 }
 
@@ -360,6 +362,34 @@ export class MTB5Converter {
         const dependsPath = this.dependsPath ?? '' ;
         const dependsDB = loadDependsDB(dependsPath) ;
 
+        // Resolve the active BSP once up-front and read its dep asset names so we
+        // can classify BSP-sourced assets as conditional in firmware.cmake.
+        const bspDepsAssets = new Set<string>() ;
+        let resolvedBspName: string | undefined ;
+        try {
+            resolvedBspName = this.resolveBspName() ;
+            const bspDepsDir = path.join(this.dest_, 'bsps', resolvedBspName, 'deps') ;
+            if (fs.existsSync(bspDepsDir)) {
+                for (const dep of fs.readdirSync(bspDepsDir, { withFileTypes: true })) {
+                    if (dep.isFile() && dep.name.endsWith('.mtbx')) {
+                        try {
+                            const req = MTBAssetRequest.createFromFile(
+                                path.join(bspDepsDir, dep.name), MTBAssetStorageFormat.MTBX, true) ;
+                            const name = req.name() ;
+                            if (!name.startsWith('TARGET_')) {
+                                bspDepsAssets.add(name) ;
+                                this.logger_.info(`  BSP dep asset: ${name}`) ;
+                            }
+                        } catch (e) {
+                            this.logger_.warn(`  Could not parse BSP dep file: ${e}`) ;
+                        }
+                    }
+                }
+            }
+        } catch {
+            // No BSP available — all assets will be unconditional in firmware.cmake
+        }
+
         for (const project of appInfo.projects) {
             const projName = project.name ;
             const srcProjDir = project.path ;
@@ -402,6 +432,9 @@ export class MTB5Converter {
                 }
 
                 const assetName = req.name() ;
+                if (assetName === 'core-make') {
+                    continue ;
+                }
                 if (seenAssets.has(assetName)) {
                     continue ;
                 }
@@ -436,7 +469,8 @@ export class MTB5Converter {
                         assetSubs.push({
                             name: assetName,
                             relativePath,
-                            targetName: `${projName}_cm33_${assetName}`
+                            targetName: `${projName}_cm33_${assetName}`,
+                            bspName: bspDepsAssets.has(assetName) ? resolvedBspName : undefined
                         }) ;
                     }
 
@@ -450,7 +484,6 @@ export class MTB5Converter {
             }
 
             // Generate CMakeLists.txt for the project
-            const bspName = this.resolveBspName() ;
             const sources = collectSources(destProjDir, destProjDir) ;
             const components = project.components ;
 
@@ -529,7 +562,7 @@ export class MTB5Converter {
             for (const req of project.assetsRequests) {
                 if (req.isBSP()) continue ;
                 const aName = req.name() ;
-                if (aName === 'device-db') continue ;
+                if (aName === 'device-db' || aName === 'core-make') continue ;
                 const srcAssetPath = req.fullPath(dirList) ;
                 assetPathMap.set(
                     path.normalize(srcAssetPath),
@@ -538,7 +571,7 @@ export class MTB5Converter {
             }
             remapFlagPaths(flagsByToolchain, srcProjDir, assetPathMap) ;
 
-            generateProjectCMakeLists(destProjDir, projName, sources, assetSubs, projectIncludeDirs, bspName, components, flagsByToolchain, debugDefines, releaseDefines, dependsDB) ;
+            generateProjectCMakeLists(destProjDir, projName, sources, assetSubs, projectIncludeDirs, resolvedBspName, components, flagsByToolchain, debugDefines, releaseDefines, dependsDB) ;
             this.logger_.info(`Generated CMakeLists.txt for project '${projName}'`) ;
             generateProjInfoCMake(destProjDir, components) ;
             this.logger_.info(`Generated projinfo.cmake for project '${projName}'`) ;
@@ -810,17 +843,15 @@ export class MTB5Converter {
             }
         }
 
-        generateTopLevelCMakeLists(this.dest_, projectNames, bspNameResolved, signCombineInfo, this.setOverrides, this.cmseProjects_) ;
+        const sortedProjectNames = generateTopLevelCMakeLists(this.dest_, projectNames, bspNameResolved, signCombineInfo, this.setOverrides, this.cmseProjects_) ;
         this.logger_.info('Generated top-level CMakeLists.txt') ;
 
-        // Generate appinfo.cmake using device and component info from the first project.
+        generateMtbCMake(this.dest_, bspNameResolved, signCombineInfo) ;
+        this.logger_.info('Generated mtb.cmake') ;
+
+        // Generate appinfo.cmake with project list, BSP name/path, and sign-combine symbols.
         if (appInfo.projects.length > 0) {
-            const firstProject = appInfo.projects[0] ;
-            const device = firstProject.device ?? '' ;
-            const additionalDevicesRaw = firstProject.getVar('MTB_ADDITIONAL_DEVICES') ?? '' ;
-            const deviceList = [device, ...additionalDevicesRaw.split(' ').filter(d => d.length > 0)] ;
-            const components = firstProject.components ;
-            generateAppInfoCMake(this.dest_, device, deviceList, bspNameResolved, signCombineInfo, this.setOverrides) ;
+            generateAppInfoCMake(this.dest_, sortedProjectNames, bspNameResolved, signCombineInfo, this.setOverrides) ;
             this.logger_.info('Generated appinfo.cmake') ;
         }
 
