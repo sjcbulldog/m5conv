@@ -737,6 +737,7 @@
             "include"
         ],
         "imports": [
+            "azure-sdk-for-c",
             "connectivity-utilities",
             "lwip",
             "lwip-freertos-integration",
@@ -1089,7 +1090,8 @@
     {
         "name" : "azure-sdk-for-c",
         "exports" : [
-            "include"
+            "include",
+            "sdk/inc/azure/core"
         ],
         "imports" : [
             "core-lib",

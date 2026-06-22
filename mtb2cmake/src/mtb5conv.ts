@@ -61,6 +61,15 @@ export class MTB5Converter {
     // Projects detected to use CMSE TrustZone veneer generation (populated during copyProjects)
     private cmseProjects_ : Set<string> = new Set() ;
 
+    // Top-level shared directories copied from the source app into the destination
+    // and treated similarly to assets so projects can add_subdirectory them.
+    private sharedTopLevelDirs_ : { name: string ; destPath: string }[] = [] ;
+
+    // Public accessor for the final destination directory chosen by the converter.
+    public getGeneratedDir(): string {
+        return this.dest_ ;
+    }
+
     constructor(src : string, dest: string, logfile?: string) {
         this.src_ = src ;
         this.dest_ = dest ;
@@ -88,20 +97,54 @@ export class MTB5Converter {
     }
 
     public async convert() : Promise<void> {
+        const baseDest = this.dest_ ;
+
+        // For cmake-only mode require the base destination to exist (we will create a subdir under it).
         if (this.cmakeOnly) {
-            if (!fs.existsSync(this.dest_)) {
-                throw new Error(`Destination directory does not exist: ${this.dest_} (--cmake-only requires an existing destination)`) ;
+            if (!fs.existsSync(baseDest)) {
+                throw new Error(`Destination directory does not exist: ${baseDest} (--cmake-only requires an existing destination)`) ;
             }
-        } else if (fs.existsSync(this.dest_)) {
-            if (this.forceDeleteDest) {
-                this.logger_.info(`Removing existing destination directory: ${this.dest_}`) ;
-                try {
-                    fs.rmSync(this.dest_, { recursive: true, force: true }) ;
-                } catch (err: any) {
-                    throw new Error(`Failed to remove destination directory '${this.dest_}': ${err.message}`) ;
-                }
-            } else {
-                throw new Error(`Destination directory already exists: ${this.dest_} (use --force to remove)`) ;
+        }
+
+        // If --force was specified, remove the base destination before creating the final subdir.
+        if (!this.cmakeOnly && this.forceDeleteDest && fs.existsSync(baseDest)) {
+            this.logger_.info(`Removing existing destination directory: ${baseDest}`) ;
+            try {
+                fs.rmSync(baseDest, { recursive: true, force: true }) ;
+            } catch (err: any) {
+                throw new Error(`Failed to remove destination directory '${baseDest}': ${err.message}`) ;
+            }
+        }
+
+        // Choose final destination as a subdirectory 'aN' under the provided destination
+        // (e.g., <dest>/a1). Find the first non-existent aN.
+        let n = 1 ;
+        let finalDest = '' ;
+        do {
+            finalDest = path.join(baseDest, 'a' + n.toString()) ;
+            n++ ;
+        } while (fs.existsSync(finalDest)) ;
+        if (finalDest !== this.dest_) {
+            this.logger_.info(`Using destination subdirectory: ${finalDest}`) ;
+        }
+        this.dest_ = finalDest ;
+
+        // Ensure destination directory exists for non-cmake-only conversions and write appname.json
+        if (!this.cmakeOnly) {
+            try {
+                fs.mkdirSync(this.dest_, { recursive: true }) ;
+            } catch (err: any) {
+                throw new Error(`Failed to create destination directory '${this.dest_}': ${err.message}`) ;
+            }
+
+            // Write appname.json containing the basename of the source path
+            const appnameObj = { appname: path.basename(this.src_) } ;
+            const appnamePath = path.join(this.dest_, 'appname.json') ;
+            try {
+                fs.writeFileSync(appnamePath, JSON.stringify(appnameObj, null, 2), { encoding: 'utf-8' }) ;
+                this.logger_.info(`Wrote appname file: ${appnamePath}`) ;
+            } catch (err: any) {
+                this.logger_.warn(`Failed to write appname.json to '${appnamePath}': ${err.message}`) ;
             }
         }
 
@@ -113,6 +156,7 @@ export class MTB5Converter {
         this.logger_.info('Converting app info...') ;
         await this.copyBSPs() ;
         await this.copyAssets() ;
+        await this.copyTopLevelSharedDirs() ;
         await this.copyProjects() ;
         this.generateTopLevel() ;
     }
@@ -352,6 +396,82 @@ export class MTB5Converter {
         throw new Error(`Multiple BSPs found (${bspDirs.join(', ')}). Use --bsp to specify which one to use.`) ;
     }
 
+    private async copyTopLevelSharedDirs() : Promise<void> {
+        const appInfo = this.env_.appInfo ;
+        if (!appInfo) return ;
+        const entries = fs.readdirSync(this.src_, { withFileTypes: true }) ;
+        const projectPaths = new Set(appInfo.projects.map(p => path.normalize(p.path))) ;
+        for (const entry of entries) {
+            if (!entry.isDirectory()) continue ;
+            // Skip BSPs directory (case-insensitive) — BSPs are handled separately via copyBSPs()
+            if (entry.name.toLowerCase() === 'bsps') continue ;
+            const srcDir = path.join(this.src_, entry.name) ;
+            // Skip if this directory is a known project path
+            if (projectPaths.has(path.normalize(srcDir))) continue ;
+            // Determine if the directory contains code files (.h, .c, .cpp, .cc, .s)
+            const hasCode = (dir: string) : boolean => {
+                const stack = [dir] ;
+                while (stack.length > 0) {
+                    const d = stack.pop()! ;
+                    let ents: fs.Dirent[] ;
+                    try { ents = fs.readdirSync(d, { withFileTypes: true }) ; } catch { continue ; }
+                    for (const e of ents) {
+                        const p = path.join(d, e.name) ;
+                        if (e.isFile()) {
+                            const ext = path.extname(e.name).toLowerCase() ;
+                            if (ext === '.h' || ext === '.c' || ext === '.cpp' || ext === '.cc' || ext === '.cxx' || ext === '.s') {
+                                return true ;
+                            }
+                        } else if (e.isDirectory()) {
+                            stack.push(p) ;
+                        }
+                    }
+                }
+                return false ;
+            } ;
+            if (!hasCode(srcDir)) continue ;
+            const destDir = path.join(this.dest_, entry.name) ;
+            if (!this.cmakeOnly) {
+                this.logger_.info(`Copying top-level shared directory: ${entry.name}`) ;
+                const skipped = await copyDirTolerant(srcDir, destDir) ;
+                warnSkippedFiles(this.logger_, `shared '${entry.name}'`, skipped) ;
+                const gitDir = path.join(destDir, '.git') ;
+                if (fs.existsSync(gitDir)) {
+                    try { await fs.promises.rm(gitDir, { recursive: true, force: true }) ; } catch (e) { this.logger_.warn(`Failed to remove .git from shared '${entry.name}': ${e}`) ; }
+                }
+            } else if (!fs.existsSync(destDir)) {
+                this.logger_.warn(`Shared directory '${entry.name}' not found in destination - skipping`) ;
+                continue ;
+            }
+            // Generate CMakeLists for the shared directory like an asset so projects
+            // can add_subdirectory() it and link against the resulting target.
+            const sources = collectSources(destDir, destDir) ;
+            const headers = collectHeaders(destDir, destDir) ;
+            const libraries = collectLibraries(destDir, destDir) ;
+            const includeDirs = collectProjectHeaderDirs(destDir, destDir) ;
+            // Ensure BSP include dirs are present so shared directories that reference
+            // BSP-provided headers (bsp root and config/GeneratedSource) resolve correctly
+            // when the shared asset is add_subdirectory()'d by a project.
+            const bspInc = '${BSP_DIR}' ;
+            const bspGenInc = '${BSP_DIR}/config/GeneratedSource' ;
+            const hasBsp = includeDirs.some(d => d.path === bspInc) ;
+            const hasBspGen = includeDirs.some(d => d.path === bspGenInc) ;
+            if (!hasBsp) includeDirs.push({ path: bspInc, conditions: [] }) ;
+            if (!hasBspGen) includeDirs.push({ path: bspGenInc, conditions: [] }) ;
+            if (sources.length > 0) {
+                generateObjectLibraryCMakeLists(destDir, entry.name, sources, includeDirs, [], libraries) ;
+                this.logger_.info(`Generated CMakeLists.txt for shared directory '${entry.name}'`) ;
+            } else if (libraries.length > 0) {
+                generateLibraryAssetCMakeLists(destDir, entry.name, libraries, includeDirs) ;
+                this.logger_.info(`Generated library-only CMakeLists.txt for shared directory '${entry.name}'`) ;
+            } else {
+                generateHeaderOnlyCMakeLists(destDir, entry.name, includeDirs) ;
+                this.logger_.info(`Generated header-only CMakeLists.txt for shared directory '${entry.name}'`) ;
+            }
+            this.sharedTopLevelDirs_.push({ name: entry.name, destPath: destDir }) ;
+        }
+    }
+
     private async copyProjects() : Promise<void> {
         const appInfo = this.env_.appInfo ;
         if (!appInfo) {
@@ -481,6 +601,20 @@ export class MTB5Converter {
                 } else {
                     this.logger_.warn(`Asset '${assetName}' not found in destination - skipping add_subdirectory`) ;
                 }
+            }
+
+            // Add top-level shared directories as asset subdirectories so projects
+            // build and link them like normal assets. Skip names already seen.
+            for (const shared of this.sharedTopLevelDirs_) {
+                if (seenAssets.has(shared.name)) continue ;
+                const relativePath = path.relative(destProjDir, shared.destPath).replace(/\\/g, '/') ;
+                this.logger_.info(`  Adding shared directory to project: ${shared.name} -> ${relativePath}`) ;
+                assetSubs.push({
+                    name: shared.name,
+                    relativePath,
+                    targetName: `${projName}_cm33_${shared.name}`,
+                    bspName: undefined
+                }) ;
             }
 
             // Generate CMakeLists.txt for the project

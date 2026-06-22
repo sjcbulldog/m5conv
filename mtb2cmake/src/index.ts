@@ -1,4 +1,6 @@
 import { MTB5Converter } from "./mtb5conv";
+import * as fs from 'fs';
+import * as path from 'path';
 
 function printUsage(): void {
     console.log("Usage: mtb5conv [options]");
@@ -15,6 +17,7 @@ function printUsage(): void {
     console.log("  --target <list>        Comma-separated toolchain targets to process (iar,gcc,llvm,arm; default: all)");
     console.log("  --depends <path>       Path to depends.json file (required)");
     console.log("  --cmake-only           Regenerate cmake files only; skip all file copies (dest must already exist, cannot use with --force)");
+  console.log("  --generated-dir <file> Write a single-line file containing the full path (forward slashes) of the generated cmake directory");
 }
 
 function main(): void {
@@ -32,6 +35,7 @@ function main(): void {
     const setOverrides = new Map<string, string>();
     const validTargets = new Set(['iar', 'gcc', 'llvm', 'arm']);
     let targets: Set<string> | undefined;
+    let generatedDirFile: string | undefined;
 
     for (let i = 0; i < args.length; i++) {
         const arg = args[i];
@@ -120,6 +124,14 @@ function main(): void {
                 process.exit(1);
             }
             targets = new Set(words);
+        } else if (arg === "--generated-dir") {
+            i++;
+            if (i >= args.length) {
+                console.error("Error: --generated-dir requires a file path argument");
+                printUsage();
+                process.exit(1);
+            }
+            generatedDirFile = args[i];
         } else {
             console.error(`Unknown argument: ${arg}`);
             printUsage();
@@ -167,6 +179,35 @@ function main(): void {
     converter.convert()
         .then(() => {
             console.log("Conversion complete");
+            if (generatedDirFile) {
+                try {
+                    // Get the generated directory from the converter and format it as a full path
+                    // with forward slashes and Windows drive-letter form if applicable.
+                    let genDir = converter.getGeneratedDir();
+
+                    // Resolve to absolute path where possible
+                    try {
+                        genDir = path.resolve(genDir);
+                    } catch (e) {
+                        // ignore and use as-is
+                    }
+
+                    // Convert Cygwin /cygdrive style to C:/ drive letter if present
+                    const cygmatch = genDir.match(/^\/cygdrive\/(\w)\/(.*)$/);
+                    if (cygmatch) {
+                        genDir = `${cygmatch[1].toUpperCase()}:/${cygmatch[2]}`;
+                    }
+
+                    // Replace backslashes with forward slashes for consistent output
+                    genDir = genDir.replace(/\\/g, '/');
+
+                    fs.writeFileSync(generatedDirFile, genDir + '\n', { encoding: 'utf-8' });
+                    console.log(`Wrote generated dir to ${generatedDirFile}`);
+                } catch (err: any) {
+                    console.error(`Failed to write generated-dir file '${generatedDirFile}': ${err.message}`);
+                    process.exit(1);
+                }
+            }
         })
         .catch((err) => {
             console.error(`Conversion failed: ${err}`);

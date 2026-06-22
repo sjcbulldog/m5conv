@@ -7,12 +7,9 @@
       "request": "launch",
       "program": "${workspaceFolder}/dist/index.js",
       "args": [
-        "--bsp",
-        "KIT_PSE84_EVAL_EPC2",
-        "--dest",
-        "c:/sdk4/mtb3",
-        "--creator",
-        "C:/users/GriffinButch/ModusToolbox/tools_3.8/project-creator/project-creator-cli.exe"
+        "--bsps", "KIT_PSE84_EVAL_EPC2,KIT_PSE84_EVAL_EPC4,KIT_PSE84_AI",
+        "--dest", "c:/mtb4/proj3",
+        "--creator", "C:/users/butch/ModusToolbox/tools_3.8/project-creator/project-creator-cli.exe"
       ],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
@@ -27,12 +24,9 @@
       "request": "launch",
       "program": "${workspaceFolder}/dist/index.js",
       "args": [
-        "--bsp",
-        "KIT_PSE84_EVAL_EPC2",
-        "--dest",
-        "c:/sdk4/mtb3",
-        "--creator",
-        "C:/users/GriffinButch/ModusToolbox/tools_3.8/project-creator/project-creator-cli.exe",
+        "--bsps", "KIT_PSE84_EVAL_EPC2,KIT_PSE84_EVAL_createEPC4,KIT_PSE84_AI",
+        "--dest", "c:/mtb4/proj3",
+        "--creator", "C:/users/butch/ModusToolbox/tools_3.8/project-creator/project-creator-cli.exe",
         "--force"
       ],
       "cwd": "${workspaceFolder}",

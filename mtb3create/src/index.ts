@@ -3,7 +3,7 @@
 import { constants as fsConstants } from "node:fs";
 import { access, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -46,6 +46,8 @@ async function main(): Promise<void> {
 
     for (const plan of plans) {
       process.stdout.write(`- ${plan.appId} (BSP: ${plan.bsp}) ... `);
+      // Ensure BSP subdirectory exists before invoking the creator so target-dir is present.
+      await mkdir(dirname(plan.appPath), { recursive: true });
       const createResult = await createApplication(args.creator, plan.bsp, plan.appId, plan.appPath);
       await writeCreateLog(plan, createResult);
       if (!createResult.ok) {
@@ -91,8 +93,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       throw new Error(`Missing value for argument ${token}`);
     }
 
-    if (token === "--bsp") {
-      argMap.set("bsp", value);
+    if (token === "--bsps") {
+      argMap.set("bsps", value);
     } else if (token === "--dest") {
       argMap.set("dest", value);
     } else if (token === "--creator") {
@@ -103,7 +105,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     i += 1;
   }
 
-  const bspRaw = asStringOrThrow(argMap.get("bsp"), "--bsp is required");
+  const bspRaw = asStringOrThrow(argMap.get("bsps"), "--bsps is required");
   const destRaw = asStringOrThrow(argMap.get("dest"), "--dest is required");
   const creatorRaw = asStringOrThrow(argMap.get("creator"), "--creator is required");
 
@@ -113,7 +115,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     .filter((bsp) => bsp.length > 0);
 
   if (bsps.length === 0) {
-    throw new Error("--bsp must include at least one BSP value");
+    throw new Error("--bsps must include at least one BSP value");
   }
 
   return {
@@ -133,10 +135,10 @@ function asStringOrThrow(value: string | boolean | undefined, message: string): 
 
 function printHelp(): void {
   console.log(`Usage:
-  mtb3create --bsp BSPLIST --dest PATH --creator PATH [--force]
+  mtb3create --bsps BSPLIST --dest PATH --creator PATH [--force]
 
 Arguments:
-  --bsp      Comma-separated BSP list, e.g. BSP_DESIGN_MODUS3,BSP_FOO
+  --bsps     Comma-separated BSP list, e.g. BSP_DESIGN_MODUS3,BSP_FOO
   --dest     Destination directory for created applications
   --creator  Path to ModusToolbox project creator executable
   --force    If --dest exists and is not empty, delete its contents first
@@ -161,6 +163,8 @@ async function prepareDestination(dest: string, force: boolean): Promise<void> {
 
   if (!exists) {
     await mkdir(dest, { recursive: true });
+    // Ensure logs directory exists inside destination.
+    await mkdir(resolve(dest, "logs"), { recursive: true });
     return;
   }
 
@@ -180,26 +184,21 @@ async function prepareDestination(dest: string, force: boolean): Promise<void> {
 
   await rm(dest, { recursive: true, force: true });
   await mkdir(dest, { recursive: true });
+  // Recreate logs directory after clearing destination.
+  await mkdir(resolve(dest, "logs"), { recursive: true });
 }
 
 async function buildPlans(bsps: string[], dest: string, creator: string): Promise<CreatePlan[]> {
   const plans: CreatePlan[] = [];
-  const seen = new Set<string>();
-
   for (const bsp of bsps) {
     const appIds = await listApplicationsForBsp(creator, bsp);
     if (appIds.length === 0) {
       console.warn(`No applications found for BSP ${bsp}`);
       continue;
     }
-
     for (const appId of appIds) {
-      if (seen.has(appId)) {
-        console.warn(`Skipping duplicate app id across BSPs: ${appId}`);
-        continue;
-      }
-      seen.add(appId);
-      plans.push({ bsp, appId, appPath: resolve(dest, appId) });
+      // Create each app under a BSP-named subdirectory so each BSP gets its own folder.
+      plans.push({ bsp, appId, appPath: resolve(dest, bsp, appId) });
     }
   }
 
@@ -318,8 +317,14 @@ async function createApplication(
 
   const errors: string[] = [];
 
+  // Ensure logs directory exists so runCreatorWithLog can write to it immediately.
+  const dest = resolve(dirname(dirname(appPath)));
+  const logDir = resolve(dest, "logs");
+  await mkdir(logDir, { recursive: true });
+  const logPath = resolve(logDir, `${appId}_${bsp}.log`);
+
   for (const args of candidates) {
-    const result = await runCreator(creator, args);
+    const result = await runCreatorWithLog(creator, args, logPath);
     if (result.ok) {
       return result;
     }
@@ -335,11 +340,67 @@ async function createApplication(
   };
 }
 
+async function runCreatorWithLog(creator: string, args: string[], logPath: string): Promise<ExecResult> {
+  return new Promise<ExecResult>((resolvePromise) => {
+    const outBuffers: Buffer[] = [];
+    const errBuffers: Buffer[] = [];
+    const child = spawn(creator, args, { windowsHide: true, shell: true });
+
+    const ws = require("node:fs").createWriteStream(logPath, { flags: "a" });
+    ws.write(`\n--- Invocation: ${creator} ${args.join(" ")} ---\n`);
+
+    if (child.stdout) {
+      child.stdout.on("data", (chunk: Buffer) => {
+        outBuffers.push(Buffer.from(chunk));
+        ws.write(chunk);
+      });
+    }
+    if (child.stderr) {
+      child.stderr.on("data", (chunk: Buffer) => {
+        errBuffers.push(Buffer.from(chunk));
+        ws.write(chunk);
+      });
+    }
+
+    let finished = false;
+    const timeoutMs = 300000; // 5 minutes
+    const killTimer = setTimeout(() => {
+      try {
+        child.kill();
+      } catch {
+        // ignore
+      }
+    }, timeoutMs);
+
+    child.on("error", (err) => {
+      clearTimeout(killTimer);
+      if (finished) return;
+      finished = true;
+      ws.write(`\n[child error] ${String(err)}\n`);
+      ws.end();
+      resolvePromise({ ok: false, stdout: Buffer.concat(outBuffers).toString(), stderr: Buffer.concat(errBuffers).toString() + `\n${String(err)}` });
+    });
+
+    child.on("close", (code, signal) => {
+      clearTimeout(killTimer);
+      if (finished) return;
+      finished = true;
+      const stdout = Buffer.concat(outBuffers).toString();
+      const stderr = Buffer.concat(errBuffers).toString();
+      ws.write(`\n[exit code=${code} signal=${signal}]\n`);
+      ws.end();
+      resolvePromise({ ok: code === 0, stdout, stderr, code: typeof code === "number" ? code : undefined });
+    });
+  });
+}
+
 function composeCreateFailureMessage(plan: CreatePlan, result: ExecResult): string {
+  const dest = resolve(dirname(dirname(plan.appPath)));
+  const logPath = resolve(dest, "logs", `${plan.appId}_${plan.bsp}.log`);
   return [
     `Failed to create app ${plan.appId} for BSP ${plan.bsp}.`,
     "Tried multiple invocation patterns.",
-    `See log: ${resolve(dirname(plan.appPath), `${plan.appId}.log`)}`,
+    `See log: ${logPath}`,
     result.stderr,
   ]
     .filter((line) => line.length > 0)
@@ -347,7 +408,10 @@ function composeCreateFailureMessage(plan: CreatePlan, result: ExecResult): stri
 }
 
 async function writeCreateLog(plan: CreatePlan, result: ExecResult): Promise<void> {
-  const logPath = resolve(dirname(plan.appPath), `${plan.appId}.log`);
+  const dest = resolve(dirname(dirname(plan.appPath)));
+  const logDir = resolve(dest, "logs");
+  await mkdir(logDir, { recursive: true });
+  const logPath = resolve(logDir, `${plan.appId}_${plan.bsp}.log`);
   const sections = [
     `appId: ${plan.appId}`,
     `bsp: ${plan.bsp}`,
@@ -374,10 +438,14 @@ function formatFailedInvocation(args: string[], result: ExecResult): string {
 }
 
 async function runCreator(creator: string, args: string[]): Promise<ExecResult> {
+  // Timeout in ms for creator invocations. Prevents hangs when a creator blocks for input.
+  const timeoutMs = 300000; // 5 minutes
   try {
     const { stdout, stderr } = await execFileAsync(creator, args, {
       windowsHide: true,
       maxBuffer: 10 * 1024 * 1024,
+      timeout: timeoutMs,
+      shell: true,
     });
 
     return {
@@ -390,15 +458,24 @@ async function runCreator(creator: string, args: string[]): Promise<ExecResult> 
       stdout?: string | Buffer;
       stderr?: string | Buffer;
       code?: number | string;
+      signal?: string | null;
+      killed?: boolean;
+      message?: string;
     };
+
+    let stderrText = String(maybe.stderr ?? maybe.message ?? "");
+    if (maybe.killed && maybe.signal) {
+      stderrText = `Process killed by signal ${maybe.signal} after ${timeoutMs}ms\n${stderrText}`;
+    }
 
     return {
       ok: false,
       stdout: String(maybe.stdout ?? ""),
-      stderr: String(maybe.stderr ?? maybe.message ?? ""),
+      stderr: stderrText,
       code: typeof maybe.code === "number" ? maybe.code : undefined,
     };
   }
 }
 
 void main();
+

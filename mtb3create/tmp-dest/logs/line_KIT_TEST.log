@@ -1,0 +1,9 @@
+appId: line
+bsp: KIT_TEST
+status: ok
+
+[stdout]
+Listing or creating app --app-id line --board-id KIT_TEST --target-dir C:\mtb4\m5conv\mtb3create\tmp-dest\KIT_TEST --user-app-name line
+line 1
+line 2
+line 3

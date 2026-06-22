@@ -1100,7 +1100,7 @@ export function extractPathConditions(dirPath: string) : DirCondition[] {
 //
 // The file extensions treated as source files.
 //
-const sourceExtensions = new Set(['.c', '.s']) ;
+const sourceExtensions = new Set(['.c', '.s', '.cpp', '.cc', '.cxx']) ;
 
 //
 // The file extensions treated as header files.
@@ -1707,16 +1707,27 @@ export function generateLibraryAssetCMakeLists(
     lines.push(`    set(MTB5_ASSET_TARGET ${libraryName})`) ;
     lines.push('endif()') ;
     lines.push('') ;
-    lines.push('add_library(${MTB5_ASSET_TARGET} INTERFACE)') ;
+    lines.push('if(NOT TARGET ${MTB5_ASSET_TARGET})') ;
+    lines.push('    add_library(${MTB5_ASSET_TARGET} INTERFACE)') ;
+    lines.push('endif()') ;
 
     // Unconditional library files
     if (unconditional.length > 0) {
         lines.push('') ;
-        lines.push('target_link_libraries(${MTB5_ASSET_TARGET} INTERFACE') ;
+        lines.push('get_target_property(_mtb5_asset_type ${MTB5_ASSET_TARGET} TYPE)') ;
+        lines.push('if(_mtb5_asset_type STREQUAL "INTERFACE_LIBRARY")') ;
+        lines.push('    target_link_libraries(${MTB5_ASSET_TARGET} INTERFACE') ;
         for (const lib of unconditional) {
             lines.push(`    \${CMAKE_CURRENT_SOURCE_DIR}/${lib}`) ;
         }
-        lines.push(')') ;
+        lines.push('    )') ;
+        lines.push('else()') ;
+        lines.push('    target_link_libraries(${MTB5_ASSET_TARGET} PUBLIC') ;
+        for (const lib of unconditional) {
+            lines.push(`    \${CMAKE_CURRENT_SOURCE_DIR}/${lib}`) ;
+        }
+        lines.push('    )') ;
+        lines.push('endif()') ;
     }
 
     // Conditional library file groups
@@ -1726,11 +1737,20 @@ export function generateLibraryAssetCMakeLists(
         group.files.sort() ;
         lines.push('') ;
         lines.push(`if(${conditionToCMake(group.conditions)})`) ;
-        lines.push('    target_link_libraries(${MTB5_ASSET_TARGET} INTERFACE') ;
+        lines.push('    get_target_property(_mtb5_asset_type ${MTB5_ASSET_TARGET} TYPE)') ;
+        lines.push('    if(_mtb5_asset_type STREQUAL "INTERFACE_LIBRARY")') ;
+        lines.push('        target_link_libraries(${MTB5_ASSET_TARGET} INTERFACE') ;
         for (const lib of group.files) {
-            lines.push(`        \${CMAKE_CURRENT_SOURCE_DIR}/${lib}`) ;
+            lines.push(`            \${CMAKE_CURRENT_SOURCE_DIR}/${lib}`) ;
         }
-        lines.push('    )') ;
+        lines.push('        )') ;
+        lines.push('    else()') ;
+        lines.push('        target_link_libraries(${MTB5_ASSET_TARGET} PUBLIC') ;
+        for (const lib of group.files) {
+            lines.push(`            \${CMAKE_CURRENT_SOURCE_DIR}/${lib}`) ;
+        }
+        lines.push('        )') ;
+        lines.push('    endif()') ;
         lines.push('endif()') ;
     }
 
@@ -1741,11 +1761,20 @@ export function generateLibraryAssetCMakeLists(
 
         if (unconditionalIncs.length > 0) {
             lines.push('') ;
-            lines.push('target_include_directories(${MTB5_ASSET_TARGET} INTERFACE') ;
+            lines.push('get_target_property(_mtb5_asset_type ${MTB5_ASSET_TARGET} TYPE)') ;
+            lines.push('if(_mtb5_asset_type STREQUAL "INTERFACE_LIBRARY")') ;
+            lines.push('    target_include_directories(${MTB5_ASSET_TARGET} INTERFACE') ;
             for (const d of unconditionalIncs) {
                 lines.push(`    ${d.path}`) ;
             }
-            lines.push(')') ;
+            lines.push('    )') ;
+            lines.push('else()') ;
+            lines.push('    target_include_directories(${MTB5_ASSET_TARGET} PUBLIC') ;
+            for (const d of unconditionalIncs) {
+                lines.push(`    ${d.path}`) ;
+            }
+            lines.push('    )') ;
+            lines.push('endif()') ;
         }
 
         const incGroups = new Map<string, { conditions: DirCondition[], dirs: string[] }>() ;
@@ -1762,11 +1791,20 @@ export function generateLibraryAssetCMakeLists(
             const group = incGroups.get(key)! ;
             lines.push('') ;
             lines.push(`if(${conditionToCMake(group.conditions)})`) ;
-            lines.push('    target_include_directories(${MTB5_ASSET_TARGET} INTERFACE') ;
+            lines.push('    get_target_property(_mtb5_asset_type ${MTB5_ASSET_TARGET} TYPE)') ;
+            lines.push('    if(_mtb5_asset_type STREQUAL "INTERFACE_LIBRARY")') ;
+            lines.push('        target_include_directories(${MTB5_ASSET_TARGET} INTERFACE') ;
             for (const d of group.dirs) {
-                lines.push(`        ${d}`) ;
+                lines.push(`            ${d}`) ;
             }
-            lines.push('    )') ;
+            lines.push('        )') ;
+            lines.push('    else()') ;
+            lines.push('        target_include_directories(${MTB5_ASSET_TARGET} PUBLIC') ;
+            for (const d of group.dirs) {
+                lines.push(`            ${d}`) ;
+            }
+            lines.push('        )') ;
+            lines.push('    endif()') ;
             lines.push('endif()') ;
         }
     }
@@ -1799,7 +1837,9 @@ export function generateHeaderOnlyCMakeLists(
     lines.push(`    set(MTB5_ASSET_TARGET ${libraryName})`) ;
     lines.push('endif()') ;
     lines.push('') ;
-    lines.push('add_library(${MTB5_ASSET_TARGET} INTERFACE)') ;
+    lines.push('if(NOT TARGET ${MTB5_ASSET_TARGET})') ;
+    lines.push('    add_library(${MTB5_ASSET_TARGET} INTERFACE)') ;
+    lines.push('endif()') ;
 
     if (includeDirs.length > 0) {
         const unconditionalIncs = includeDirs.filter(d => d.conditions.length === 0) ;
@@ -1807,11 +1847,20 @@ export function generateHeaderOnlyCMakeLists(
 
         if (unconditionalIncs.length > 0) {
             lines.push('') ;
-            lines.push('target_include_directories(${MTB5_ASSET_TARGET} INTERFACE') ;
+            lines.push('get_target_property(_mtb5_asset_type ${MTB5_ASSET_TARGET} TYPE)') ;
+            lines.push('if(_mtb5_asset_type STREQUAL "INTERFACE_LIBRARY")') ;
+            lines.push('    target_include_directories(${MTB5_ASSET_TARGET} INTERFACE') ;
             for (const d of unconditionalIncs) {
                 lines.push(`    ${d.path}`) ;
             }
-            lines.push(')') ;
+            lines.push('    )') ;
+            lines.push('else()') ;
+            lines.push('    target_include_directories(${MTB5_ASSET_TARGET} PUBLIC') ;
+            for (const d of unconditionalIncs) {
+                lines.push(`    ${d.path}`) ;
+            }
+            lines.push('    )') ;
+            lines.push('endif()') ;
         }
 
         const incGroups = new Map<string, { conditions: DirCondition[], dirs: string[] }>() ;
@@ -2045,10 +2094,18 @@ function safeGenexDef(def: string): string {
     const ab = /^([^=]+=)<([^>]+)>$/.exec(def) ;
     if (!ab) return def ;
     const name = ab[1].slice(0, -1) ; // strip trailing '='
+    // Normalize the inner value by stripping any accidental extra angle brackets
+    // or previously-injected $<ANGLE-R> tokens so we don't produce nested or
+    // duplicated angle-bracket pairs in the output (e.g. <<foo>>).
+    let inner = ab[2] ;
+    // Remove leading '<' and trailing '>' if present (defensive).
+    inner = inner.replace(/^<+/, '').replace(/>+$/, '') ;
+    // Remove any trailing $<ANGLE-R> that might already be present.
+    inner = inner.replace(/\$<ANGLE-R>$/, '') ;
     if (ANGLE_BRACKET_DEFINES.has(name)) {
-        return `${ab[1]}<${ab[2]}$<ANGLE-R>` ;
+        return `${ab[1]}<${inner}$<ANGLE-R>>` ;
     }
-    return `${ab[1]}"${ab[2]}"` ;
+    return `${ab[1]}"${inner}"` ;
 }
 
 function asmExclude(def: string): string {
@@ -2258,6 +2315,38 @@ export function generateProjectCMakeLists(
     generateFirmwareCMake(targetDir, projectName, assets) ;
     lines.push('include(${CMAKE_CURRENT_SOURCE_DIR}/firmware.cmake)') ;
     lines.push('')
+    // Ensure shared/asset targets are compiled with the same include directories as the project.
+    // For each asset target (unique per project) append project include directories so that
+    // shared code sees headers available to the project during its build.
+    if (includeDirs.length > 0 && assets.length > 0) {
+        const unconditionalIncs = includeDirs.filter(d => d.conditions.length === 0) ;
+        const conditionalIncs = includeDirs.filter(d => d.conditions.length > 0) ;
+        const incGroups = new Map<string, { conditions: any[], dirs: string[] }>() ;
+        for (const d of conditionalIncs) {
+            const key = conditionKey(d.conditions) ;
+            if (!incGroups.has(key)) incGroups.set(key, { conditions: d.conditions, dirs: [] }) ;
+            incGroups.get(key)!.dirs.push(d.path) ;
+        }
+        for (const asset of assets) {
+            const tgt = asset.targetName ;
+            if (unconditionalIncs.length > 0) {
+                lines.push('') ;
+                lines.push(`target_include_directories(${tgt} PRIVATE`) ;
+                for (const d of unconditionalIncs) lines.push(`    ${d.path}`) ;
+                lines.push(')') ;
+            }
+            const sortedKeys = [...incGroups.keys()].sort() ;
+            for (const key of sortedKeys) {
+                const group = incGroups.get(key)! ;
+                lines.push('') ;
+                lines.push(`if(${conditionToCMake(group.conditions)})`) ;
+                lines.push(`    target_include_directories(${tgt} PRIVATE`) ;
+                for (const p of group.dirs) lines.push(`        ${p}`) ;
+                lines.push('    )') ;
+                lines.push('endif()') ;
+            }
+        }
+    }
 
     // Build the executable with unconditional sources
     if (unconditional.length > 0) {
@@ -3802,11 +3891,20 @@ export function generateWifiHostDriverResourceDefines(
         const emitLinkOptions = (indent: string, fwArg: string | null) => {
             const args = [...(fwArg ? [fwArg] : []), ...commonArgs] ;
             if (args.length === 0) return ;
-            iarLines.push(`${indent}target_link_options(\${MTB5_ASSET_TARGET} INTERFACE`) ;
+            iarLines.push(`${indent}get_target_property(_mtb5_asset_type \${MTB5_ASSET_TARGET} TYPE)`) ;
+            iarLines.push(`${indent}if(_mtb5_asset_type STREQUAL "INTERFACE_LIBRARY")`) ;
+            iarLines.push(`${indent}    target_link_options(\${MTB5_ASSET_TARGET} INTERFACE`) ;
             for (const arg of args) {
-                iarLines.push(`${indent}    ${arg}`) ;
+                iarLines.push(`${indent}        ${arg}`) ;
             }
-            iarLines.push(`${indent})`) ;
+            iarLines.push(`${indent}    )`) ;
+            iarLines.push(`${indent}else()`) ;
+            iarLines.push(`${indent}    target_link_options(\${MTB5_ASSET_TARGET} PUBLIC`) ;
+            for (const arg of args) {
+                iarLines.push(`${indent}        ${arg}`) ;
+            }
+            iarLines.push(`${indent}    )`) ;
+            iarLines.push(`${indent}endif()`) ;
         } ;
 
         if (!hasSense) {
