@@ -131,9 +131,9 @@ class FancyUI {
     }
 
     private ensureVisible(index: number): void {
-        if (index < this.viewStart) {
-            this.viewStart = index;
-        } else if (index >= this.viewStart + this.maxVisible) {
+        // Only scroll forward when the current app would fall below the visible window.
+        // Place it at the bottom of the list area. Never scroll backward.
+        if (index >= this.viewStart + this.maxVisible) {
             this.viewStart = index - this.maxVisible + 1;
         }
     }
@@ -197,13 +197,11 @@ function buildMtb2CmakeArgs(
     dependsJson: string,
     appSourceDir: string,
     dest: string,
-    bspName: string,
     generatedDirFile: string
 ): string[] {
     return [
         '--source', appSourceDir,
         '--dest', dest,
-        '--bsp', bspName,
         '--target', 'gcc,llvm,iar,arm',
         '--depends', dependsJson,
         '--force',
@@ -211,53 +209,72 @@ function buildMtb2CmakeArgs(
     ];
 }
 
-// Async runner that streams stdout/stderr line-by-line to the FancyUI.
+// Plain synchronous runner: captures output, writes to both console and log.
+function runCommandPlain(
+    exe: string,
+    args: string[],
+    cwd: string | undefined,
+    logStream: fs.WriteStream
+): boolean {
+    const label  = `${exe} ${args.join(' ')}`;
+    const header = `\n=== ${label} ===\n`;
+    process.stdout.write(header);
+    logStream.write(header);
+
+    const result = spawnSync(exe, args, { stdio: 'pipe', encoding: 'utf-8', cwd });
+
+    if (result.stdout) { process.stdout.write(result.stdout); logStream.write(result.stdout); }
+    if (result.stderr) { process.stderr.write(result.stderr); logStream.write(result.stderr); }
+
+    if (result.error) {
+        const msg = `Error spawning process: ${result.error.message}\n`;
+        process.stderr.write(msg);
+        logStream.write(msg);
+        return false;
+    }
+
+    const exitLine = `Exit code: ${result.status}\n`;
+    logStream.write(exitLine);
+    return result.status === 0;
+}
+
+// Async runner: streams output to FancyUI scroll pane and log file.
 async function runCommandFancy(
     exe: string,
     args: string[],
     cwd: string | undefined,
-    ui: FancyUI
+    ui: FancyUI,
+    logStream: fs.WriteStream
 ): Promise<boolean> {
+    const label  = `${exe} ${args.join(' ')}`;
+    const header = `\n=== ${label} ===\n`;
+    logStream.write(header);
+
     return new Promise((resolve) => {
         const opts: SpawnOptions = { stdio: ['ignore', 'pipe', 'pipe'], cwd };
         const child = spawn(exe, args, opts);
 
         const onData = (data: Buffer): void => {
-            for (const line of data.toString().split(/\r?\n/)) {
+            const text = data.toString();
+            logStream.write(text);
+            for (const line of text.split(/\r?\n/)) {
                 if (line) ui.writeOutput(line);
             }
         };
 
         child.stdout?.on('data', onData);
         child.stderr?.on('data', onData);
-        child.on('error', (err) => { ui.writeOutput(`Error: ${err.message}`); resolve(false); });
-        child.on('close', (code) => resolve(code === 0));
+        child.on('error', (err) => {
+            const msg = `Error spawning process: ${err.message}\n`;
+            ui.writeOutput(msg.trimEnd());
+            logStream.write(msg);
+            resolve(false);
+        });
+        child.on('close', (code) => {
+            logStream.write(`Exit code: ${code}\n`);
+            resolve(code === 0);
+        });
     });
-}
-
-// Plain (non-fancy) synchronous runners.
-function runMtb2Cmake(
-    mtb2cmakeExe: string,
-    dependsJson: string,
-    appSourceDir: string,
-    dest: string,
-    bspName: string,
-    generatedDirFile: string
-): boolean {
-    const args = buildMtb2CmakeArgs(dependsJson, appSourceDir, dest, bspName, generatedDirFile);
-    console.log(`  Running: ${mtb2cmakeExe} ${args.join(' ')}`);
-    const result = spawnSync(mtb2cmakeExe, args, { stdio: 'inherit', encoding: 'utf-8' });
-    if (result.error) { console.error(`  Error spawning mtb2cmake: ${result.error.message}`); return false; }
-    if (result.status !== 0) { console.error(`  mtb2cmake exited with code ${result.status}`); return false; }
-    return true;
-}
-
-function runCmake(cmakeArgs: string[], cwd: string): boolean {
-    console.log(`  cmake ${cmakeArgs.join(' ')}  (in ${cwd})`);
-    const result = spawnSync('cmake', cmakeArgs, { stdio: 'inherit', encoding: 'utf-8', cwd });
-    if (result.error) { console.error(`  Error spawning cmake: ${result.error.message}`); return false; }
-    if (result.status !== 0) { console.error(`  cmake exited with code ${result.status}`); return false; }
-    return true;
 }
 
 // ─── File utilities ───────────────────────────────────────────────────────────
@@ -288,13 +305,14 @@ function moveDirSync(src: string, dest: string): void {
 function findAppDirectories(sourceDir: string): string[] {
     return fs.readdirSync(sourceDir, { withFileTypes: true })
         .filter(e => e.isDirectory() && !EXCLUDED_DIRS.has(e.name))
+        .filter(e => fs.existsSync(path.join(sourceDir, e.name, 'Makefile')))
         .map(e => e.name);
 }
 
 // ─── CLI ──────────────────────────────────────────────────────────────────────
 
 function printUsage(): void {
-    console.log('Usage: bulk3tocmake --source <path> --dest <path> --good <path> --bad <path> --depends <path> --mtb2cmake <path> [options]');
+    console.log('Usage: bulk3tocmake --source <path> --dest <path> --good <path> --bad <path> --depends <path> --mtb2cmake <path> --logs <path> [options]');
     console.log('');
     console.log('Options:');
     console.log('  --source <path>     ModusToolbox workspace directory; its basename is the BSP name');
@@ -303,7 +321,9 @@ function printUsage(): void {
     console.log('  --bad <path>        Directory to move failed MTB3 app source into');
     console.log('  --depends <path>    Path to depends.json file');
     console.log('  --mtb2cmake <path>  Path to the mtb2cmake executable');
+    console.log('  --logs <path>       Directory to write per-app log files (<appname>.log)');
     console.log('  --dry-run           Print the mtb2cmake command line for each app and exit');
+    console.log('  --stop-on-error     Stop immediately on any failure, leaving the dest dir in place');
     console.log('  --fancy             Split-screen ANSI UI: app list (top third) + output scroll (bottom)');
     console.log('  --help              Display this help message');
 }
@@ -315,7 +335,9 @@ interface CliArgs {
     bad: string;
     depends: string;
     mtb2cmake: string;
+    logs: string;
     dryRun: boolean;
+    stopOnError: boolean;
     fancy: boolean;
 }
 
@@ -326,8 +348,10 @@ function parseArgs(argv: string[]): CliArgs {
     let bad: string | undefined;
     let depends: string | undefined;
     let mtb2cmake: string | undefined;
-    let dryRun = false;
-    let fancy  = false;
+    let logs: string | undefined;
+    let dryRun      = false;
+    let stopOnError = false;
+    let fancy       = false;
 
     for (let i = 0; i < argv.length; i++) {
         const arg = argv[i];
@@ -357,8 +381,14 @@ function parseArgs(argv: string[]): CliArgs {
             i++;
             if (i >= argv.length) { console.error('Error: --mtb2cmake requires a path argument'); printUsage(); process.exit(1); }
             mtb2cmake = argv[i];
+        } else if (arg === '--logs') {
+            i++;
+            if (i >= argv.length) { console.error('Error: --logs requires a path argument'); printUsage(); process.exit(1); }
+            logs = argv[i];
         } else if (arg === '--dry-run') {
             dryRun = true;
+        } else if (arg === '--stop-on-error') {
+            stopOnError = true;
         } else if (arg === '--fancy') {
             fancy = true;
         } else {
@@ -374,8 +404,9 @@ function parseArgs(argv: string[]): CliArgs {
     if (!bad)       { console.error('Error: --bad is required');       printUsage(); process.exit(1); }
     if (!depends)   { console.error('Error: --depends is required');   printUsage(); process.exit(1); }
     if (!mtb2cmake) { console.error('Error: --mtb2cmake is required'); printUsage(); process.exit(1); }
+    if (!logs)      { console.error('Error: --logs is required');      printUsage(); process.exit(1); }
 
-    return { source, dest, good, bad, depends, mtb2cmake, dryRun, fancy };
+    return { source, dest, good, bad, depends, mtb2cmake, logs, dryRun, stopOnError, fancy };
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -387,6 +418,7 @@ async function main(): Promise<void> {
     const destDir      = path.resolve(args.dest);
     const goodDir      = path.resolve(args.good);
     const badDir       = path.resolve(args.bad);
+    const logsDir      = path.resolve(args.logs);
     const bspName      = path.basename(sourceDir);
     const mtb2cmakeExe = path.resolve(args.mtb2cmake);
     const dependsJson  = path.resolve(args.depends);
@@ -419,7 +451,7 @@ async function main(): Promise<void> {
         for (const appName of appDirs) {
             const cmdArgs = buildMtb2CmakeArgs(
                 dependsJson, path.join(sourceDir, appName),
-                args.dest, bspName, generatedDirFile
+                args.dest, generatedDirFile
             );
             console.log(`${mtb2cmakeExe} ${cmdArgs.join(' ')}`);
         }
@@ -429,6 +461,7 @@ async function main(): Promise<void> {
     fs.mkdirSync(destDir, { recursive: true });
     fs.mkdirSync(goodDir, { recursive: true });
     fs.mkdirSync(badDir,  { recursive: true });
+    fs.mkdirSync(logsDir, { recursive: true });
 
     // ── Set up UI ──────────────────────────────────────────────────────────
     let ui: FancyUI | undefined;
@@ -439,7 +472,7 @@ async function main(): Promise<void> {
         const uiApps = appDirs.map(name => ({
             name,
             mtb2cmakeCmd: [mtb2cmakeExe, ...buildMtb2CmakeArgs(
-                dependsJson, path.join(sourceDir, name), args.dest, bspName, generatedDirFile
+                dependsJson, path.join(sourceDir, name), args.dest, generatedDirFile
             )].join(' '),
         }));
         ui.init(uiApps);
@@ -465,6 +498,12 @@ async function main(): Promise<void> {
         const appSourceDir = path.join(sourceDir, appName);
         const index        = passed + failed + 1;
 
+        // Open log file for this app.
+        const logFile   = path.join(logsDir, `${appName}.log`);
+        const logStream = fs.createWriteStream(logFile, { encoding: 'utf-8' });
+        logStream.write(`Log for: ${appName}\n`);
+        logStream.write(`Started: ${new Date().toISOString()}\n`);
+
         if (ui) {
             ui.setProcessing(appName);
         } else {
@@ -478,11 +517,12 @@ async function main(): Promise<void> {
         let appOk: boolean;
         if (ui) {
             ui.setStepRunning(appName, 0);
-            const mtbArgs = buildMtb2CmakeArgs(dependsJson, appSourceDir, args.dest, bspName, generatedDirFile);
-            appOk = await runCommandFancy(mtb2cmakeExe, mtbArgs, undefined, ui);
+            const mtbArgs = buildMtb2CmakeArgs(dependsJson, appSourceDir, args.dest, generatedDirFile);
+            appOk = await runCommandFancy(mtb2cmakeExe, mtbArgs, undefined, ui, logStream);
             ui.setStepDone(appName, 0, appOk);
         } else {
-            appOk = runMtb2Cmake(mtb2cmakeExe, dependsJson, appSourceDir, args.dest, bspName, generatedDirFile);
+            const mtbArgs = buildMtb2CmakeArgs(dependsJson, appSourceDir, args.dest, generatedDirFile);
+            appOk = runCommandPlain(mtb2cmakeExe, mtbArgs, undefined, logStream);
         }
 
         // --- Read generated cmake dir ---
@@ -490,10 +530,12 @@ async function main(): Promise<void> {
         if (appOk) {
             if (!fs.existsSync(generatedDirFile)) {
                 const msg = `Error: mtb2cmake did not write ${generatedDirFile}`;
-                ui ? ui.writeOutput(msg) : console.error(`  ${msg}`);
+                if (ui) { ui.writeOutput(msg); } else { console.error(`  ${msg}`); }
+                logStream.write(`${msg}\n`);
                 appOk = false;
             } else {
                 cmakeDir = fs.readFileSync(generatedDirFile, 'utf-8').trim().replace(/\//g, path.sep);
+                logStream.write(`CMake dir: ${cmakeDir}\n`);
                 if (ui) {
                     ui.setCmakeDir(appName, cmakeDir);
                 } else {
@@ -506,10 +548,10 @@ async function main(): Promise<void> {
         if (appOk && cmakeDir) {
             if (ui) {
                 ui.setStepRunning(appName, 1);
-                appOk = await runCommandFancy('cmake', ['--preset=llvm-debug'], cmakeDir, ui);
+                appOk = await runCommandFancy('cmake', ['--preset=llvm-debug'], cmakeDir, ui, logStream);
                 ui.setStepDone(appName, 1, appOk);
             } else {
-                appOk = runCmake(['--preset=llvm-debug'], cmakeDir);
+                appOk = runCommandPlain('cmake', ['--preset=llvm-debug'], cmakeDir, logStream);
             }
         }
 
@@ -517,12 +559,16 @@ async function main(): Promise<void> {
         if (appOk && cmakeDir) {
             if (ui) {
                 ui.setStepRunning(appName, 2);
-                appOk = await runCommandFancy('cmake', ['--build', 'build/llvm-debug'], cmakeDir, ui);
+                appOk = await runCommandFancy('cmake', ['--build', 'build/llvm-debug'], cmakeDir, ui, logStream);
                 ui.setStepDone(appName, 2, appOk);
             } else {
-                appOk = runCmake(['--build', 'build/llvm-debug'], cmakeDir);
+                appOk = runCommandPlain('cmake', ['--build', 'build/llvm-debug'], cmakeDir, logStream);
             }
         }
+
+        logStream.write(`\nFinished: ${new Date().toISOString()}\n`);
+        logStream.write(`Result: ${appOk ? 'GOOD' : 'BAD'}\n`);
+        await new Promise<void>((res) => logStream.end(res));
 
         // --- Move source and update status ---
         if (appOk) {
@@ -535,12 +581,6 @@ async function main(): Promise<void> {
                 console.log('');
             }
         } else {
-            if (cmakeDir && fs.existsSync(cmakeDir)) {
-                fs.rmSync(cmakeDir, { recursive: true, force: true });
-            }
-            if (fs.existsSync(appSourceDir)) {
-                moveDirSync(appSourceDir, path.join(badDir, appName));
-            }
             failed++;
             failures.push(appName);
             if (ui) {
@@ -548,6 +588,17 @@ async function main(): Promise<void> {
             } else {
                 console.error(`  ✗ ${appName} failed`);
                 console.log('');
+            }
+            if (args.stopOnError) {
+                if (ui) ui.cleanup();
+                console.error(`Stopped after failure: ${appName} (--stop-on-error)`);
+                process.exit(1);
+            }
+            if (cmakeDir && fs.existsSync(cmakeDir)) {
+                fs.rmSync(cmakeDir, { recursive: true, force: true });
+            }
+            if (fs.existsSync(appSourceDir)) {
+                moveDirSync(appSourceDir, path.join(badDir, appName));
             }
         }
     }
