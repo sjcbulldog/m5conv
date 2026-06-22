@@ -2331,18 +2331,32 @@ export function generateProjectCMakeLists(
             const tgt = asset.targetName ;
             if (unconditionalIncs.length > 0) {
                 lines.push('') ;
-                lines.push(`target_include_directories(${tgt} PRIVATE`) ;
+                lines.push(`get_target_property(_mtb5_proj_asset_type ${tgt} TYPE)`) ;
+                lines.push('if(_mtb5_proj_asset_type STREQUAL "INTERFACE_LIBRARY")') ;
+                lines.push(`    target_include_directories(${tgt} INTERFACE`) ;
                 for (const d of unconditionalIncs) lines.push(`    ${d.path}`) ;
-                lines.push(')') ;
+                lines.push('    )') ;
+                lines.push('else()') ;
+                lines.push(`    target_include_directories(${tgt} PRIVATE`) ;
+                for (const d of unconditionalIncs) lines.push(`    ${d.path}`) ;
+                lines.push('    )') ;
+                lines.push('endif()') ;
             }
             const sortedKeys = [...incGroups.keys()].sort() ;
             for (const key of sortedKeys) {
                 const group = incGroups.get(key)! ;
                 lines.push('') ;
                 lines.push(`if(${conditionToCMake(group.conditions)})`) ;
-                lines.push(`    target_include_directories(${tgt} PRIVATE`) ;
+                lines.push(`    get_target_property(_mtb5_proj_asset_type ${tgt} TYPE)`) ;
+                lines.push('    if(_mtb5_proj_asset_type STREQUAL "INTERFACE_LIBRARY")') ;
+                lines.push(`        target_include_directories(${tgt} INTERFACE`) ;
                 for (const p of group.dirs) lines.push(`        ${p}`) ;
-                lines.push('    )') ;
+                lines.push('        )') ;
+                lines.push('    else()') ;
+                lines.push(`        target_include_directories(${tgt} PRIVATE`) ;
+                for (const p of group.dirs) lines.push(`        ${p}`) ;
+                lines.push('        )') ;
+                lines.push('    endif()') ;
                 lines.push('endif()') ;
             }
         }
