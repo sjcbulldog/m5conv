@@ -1,0 +1,27 @@
+{
+  "name": "bulk3tocmake",
+  "version": "1.0.0",
+  "description": "Bulk convert ModusToolbox 3.x workspace directories to CMake projects",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "pkg:win11": "npm run build && pkg dist/index.js --targets node18-win-x64 --output ../bin/win11/bulk3tocmake.exe",
+    "pkg:linux": "npm run build && pkg dist/index.js --targets node18-linux-x64 --output ../bin/linux/bulk3tocmake",
+    "pkg:macos": "npm run build && pkg dist/index.js --targets node18-macos-x64 --output ../bin/macos/bulk3tocmake",
+    "pkg:all": "npm run pkg:win11 && npm run pkg:linux && npm run pkg:macos"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^25.2.3",
+    "@yao-pkg/pkg": "^6.19.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "pkg": "^5.8.0"
+  }
+}

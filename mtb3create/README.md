@@ -1,39 +1,56 @@
 # mtb3create
 
-TypeScript command-line tool that creates all ModusToolbox code examples valid for one or more BSPs.
+Creates all ModusToolbox template applications for one or more BSPs by invoking the ModusToolbox project creator tool. Each application is placed under a BSP-named sub-directory inside the destination directory. Creation logs are written to a `logs/` sub-directory.
 
 ## Usage
 
-```powershell
-node dist/index.js --bsps BSP_ONE,BSP_TWO --dest C:\apps\mtb --creator C:\path\to\project-creator.exe
+```
+mtb3create --bsps <bsplist> --dest <path> --creator <path> [--force]
 ```
 
-Arguments:
+## Required Arguments
 
-- `--bsps BSPLIST` comma-separated list of BSP names.
-- `--dest PATH` destination directory for generated applications.
-- `--creator PATH` path to the ModusToolbox project creator executable.
-- `--force` if destination exists and is non-empty, delete its contents first.
+| Argument | Description |
+|---|---|
+| `--bsps <bsplist>` | Comma-separated list of BSP identifiers, e.g. `BSP_DESIGN_MODUS3,BSP_FOO` |
+| `--dest <path>` | Destination directory where application sub-directories are created |
+| `--creator <path>` | Path to the ModusToolbox project creator executable |
 
-Behavior:
+## Optional Arguments
 
-- `--dest` must be non-existent or empty.
-- With `--force`, destination contents are deleted before generation.
-- Each BSP gets its own subdirectory under the destination (dest/<BSP>). All applications for a BSP are created inside that BSP subdirectory.
-- Duplicate app ids across different BSPs are not skipped; applications are created per-BSP in their respective folders.
+| Argument | Description |
+|---|---|
+| `--force` | Delete the contents of `--dest` before creating applications if the directory is not empty |
+| `--help`, `-h` | Display usage information |
 
-## Build
+## Output Layout
 
-```powershell
-npm install
-npm run build
+```
+<dest>/
+  <BSP_NAME>/
+    <AppId>/       ← application source tree
+    ...
+  logs/
+    <AppId>_<BSP>.log
 ```
 
-## Notes on creator invocation
+## Example
 
-Different ModusToolbox versions use slightly different command formats. This CLI tries multiple known invocation patterns for both:
+```sh
+mtb3create --bsps CY8CKIT-062S2-43012,CY8CPROTO-062-4343W \
+           --dest ./apps \
+           --creator "C:/ModusToolbox/tools_3.4/project-creator/project-creator-cli.exe" \
+           --force
+```
 
-- listing app ids for each BSP
-- creating each application from app id + BSP + target path
+## Notes
 
-If your creator binary uses a custom syntax, adapt candidate argument arrays in `src/index.ts`.
+- The tool tries several common invocation patterns for the creator executable and picks the first one that succeeds.
+- A per-application log file is always written under `<dest>/logs/` regardless of success or failure.
+- Exit code is non-zero if any application fails to create.
+
+## Packaging
+
+```sh
+npm run pkg:all   # builds binaries for Windows, Linux, and macOS
+```

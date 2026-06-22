@@ -1,16 +1,25 @@
 # createproj
 
-TypeScript CLI utility for creating a new application from an SDK.
+Creates a new ModusToolbox application from an assembled SDK directory. It reads the SDK structure for the specified BSP and scaffolds the application in the destination directory.
 
-## Arguments
+## Usage
 
-- `--sdk SDKDIR` path to the SDK directory
-- `--bsp BSP_NAME` target BSP to add
-- `--dest DEST_DIR` destination directory for the new application
+```
+createproj --sdk <path> --bsp <name> --dest <path>
+```
+
+## Required Arguments
+
+| Argument | Description |
+|---|---|
+| `--sdk <path>` | Path to the SDK directory (as produced by `sdkmake`) |
+| `--bsp <name>` | BSP name to use when creating the application |
+| `--dest <path>` | Destination directory where the new application will be created |
 
 ## Example
 
-```powershell
-npm run build
-node dist/cli.js --sdk C:/sdks/edge --bsp MY_BSP --dest C:/work/new-app
+```sh
+createproj --sdk ./sdk \
+           --bsp CY8CKIT-062S2-43012 \
+           --dest ./my-app
 ```

@@ -1,54 +1,46 @@
-# Asset Manifest Generator
+# compass (compass-asset-manifest-tool)
 
-TypeScript command-line tool to generate `asset.json` files for each asset directory.
+Generates per-asset `asset.json` component manifests for a ModusToolbox SDK assets directory. For each asset sub-directory it discovers all `COMPONENT_*` directories, determines whether each component is `local` (used by only one asset) or `global` (shared across multiple assets), and writes an `asset.json` manifest file into each asset directory.
 
-## Behavior
+## Usage
 
-- Scans asset directories under `assets/` (or a custom directory path you pass as first argument).
-- Scans asset directories under `assets/` by default.
-- Supports `--sdk SDKDIR` to treat `SDKDIR` as the SDK root and scan `SDKDIR/assets`.
-- Treats each immediate subdirectory of an asset that starts with `COMPONENT_` as a component.
-- Writes an `asset.json` file inside each asset directory.
-- Manifest shape:
+```
+compass [--sdk <path>] [<assets-dir>]
+```
+
+## Arguments
+
+| Argument | Description |
+|---|---|
+| `<assets-dir>` | *(Positional, optional)* Path to the assets directory. Defaults to `./assets` relative to the current working directory |
+| `--sdk <path>` | Path to an SDK root directory; the assets directory is resolved as `<sdk>/assets` |
+
+Only one of the positional argument or `--sdk` should be provided. If both are omitted the tool defaults to `./assets`.
+
+## Output
+
+For every sub-directory found inside the assets directory, a file named `asset.json` is written with the following structure:
 
 ```json
 {
   "components": [
-    {
-      "name": "COMPONENT_EXAMPLE",
-      "type": "local",
-      "description": "TBD"
-    }
+    { "name": "COMPONENT_FREERTOS", "type": "global", "description": "TBD" },
+    { "name": "COMPONENT_CM4",      "type": "local",  "description": "TBD" }
   ]
 }
 ```
 
-- `type` is:
-  - `local` if the component appears in exactly one asset
-  - `global` if the component appears in multiple assets
+A component is marked `global` if it appears in more than one asset; otherwise it is `local`.
 
-## Usage
+## Examples
 
-```bash
-npm install
-npm run build
-npm run generate:assets
-```
+```sh
+# Use the default ./assets directory
+compass
 
-Optionally provide an assets directory:
+# Specify an assets directory explicitly
+compass ./path/to/assets
 
-```bash
-npm run generate:assets -- ./path/to/assets
-```
-
-Or provide an SDK directory that contains `assets/`:
-
-```bash
-npm run generate:assets -- --sdk ./path/to/sdk
-```
-
-For local development without build:
-
-```bash
-npm run dev:generate:assets
+# Derive the assets directory from an SDK root
+compass --sdk ./sdk
 ```
