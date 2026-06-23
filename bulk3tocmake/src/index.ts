@@ -29,6 +29,10 @@ class FancyUI {
     private resizeHandler?: () => void;
     private stdinDataHandler?: (data: Buffer) => void;
 
+    // Stats to display in the header
+    private passedCount = 0;
+    private failedStepCounts: [number, number, number] = [0, 0, 0]; // mtb2cmake, cmake --preset, cmake --build
+
     constructor() {
         this.computeLayout();
     }
@@ -98,7 +102,8 @@ class FancyUI {
         // Header
         process.stdout.write('\x1b[1;1H\x1b[K');
         const done = this.entries.filter(a => a.status === 'good' || a.status === 'bad').length;
-        process.stdout.write(`\x1b[1mApplications (${done}/${this.entries.length}):\x1b[0m`);
+        // Show counts: good, mtb2cmake failures, cmake --preset failures, cmake --build failures
+        process.stdout.write(`\x1b[1mApplications (${done}/${this.entries.length}): good=${this.passedCount}  mtb2cmake_fail=${this.failedStepCounts[0]}  cmake_preset_fail=${this.failedStepCounts[1]}  cmake_build_fail=${this.failedStepCounts[2]}\x1b[0m`);
 
         // Blank all content rows first
         for (let r = 0; r < this.topContentRows; r++) {
@@ -207,6 +212,18 @@ class FancyUI {
         const entry = this.entries.find(a => a.name === name);
         if (!entry) return;
         entry.status = success ? 'good' : 'bad';
+        this.renderTop();
+    }
+
+    // Increment the passed count and refresh the header
+    incrementPassed(): void {
+        this.passedCount++;
+        this.renderTop();
+    }
+
+    // Increment a failure counter for the given step (0,1,2) and refresh the header
+    incrementFailedStep(step: 0 | 1 | 2): void {
+        this.failedStepCounts[step]++;
         this.renderTop();
     }
 
@@ -556,6 +573,9 @@ async function main(): Promise<void> {
         // Remove stale dirname file so we can detect if mtb2cmake wrote a fresh one.
         try { fs.unlinkSync(generatedDirFile); } catch { /* ignore if absent */ }
 
+        // Track which step failed: 0=mtb2cmake,1=preset,2=build, -1=none/unknown
+        let stepFailed = -1;
+
         // --- Run mtb2cmake (step 0) ---
         let appOk: boolean;
         if (ui) {
@@ -563,49 +583,56 @@ async function main(): Promise<void> {
             const mtbArgs = buildMtb2CmakeArgs(dependsJson, appSourceDir, args.dest, generatedDirFile);
             appOk = await runCommandFancy(mtb2cmakeExe, mtbArgs, undefined, ui, logStream);
             ui.setStepDone(appName, 0, appOk);
+            if (!appOk) stepFailed = 0;
         } else {
             const mtbArgs = buildMtb2CmakeArgs(dependsJson, appSourceDir, args.dest, generatedDirFile);
             appOk = runCommandPlain(mtb2cmakeExe, mtbArgs, undefined, logStream);
+            if (!appOk) stepFailed = 0;
         }
 
         // --- Read generated cmake dir ---
         let cmakeDir: string | undefined;
         if (appOk) {
             if (!fs.existsSync(generatedDirFile)) {
-                const msg = `Error: mtb2cmake did not write ${generatedDirFile}`;
-                if (ui) { ui.writeOutput(msg); } else { console.error(`  ${msg}`); }
-                logStream.write(`${msg}\n`);
-                appOk = false;
+                            const msg = `Error: mtb2cmake did not write ${generatedDirFile}`;
+                            if (ui) { ui.writeOutput(msg); } else { console.error(`  ${msg}`); }
+                            logStream.write(`${msg}\n`);
+                            appOk = false;
+                            stepFailed = 0;
             } else {
-                cmakeDir = fs.readFileSync(generatedDirFile, 'utf-8').trim().replace(/\//g, path.sep);
-                logStream.write(`CMake dir: ${cmakeDir}\n`);
-                if (ui) {
-                    ui.setCmakeDir(appName, cmakeDir);
-                } else {
-                    console.log(`  CMake dir: ${cmakeDir}`);
-                }
+                            cmakeDir = fs.readFileSync(generatedDirFile, 'utf-8').trim().replace(/\//g, path.sep);
+                            logStream.write(`CMake dir: ${cmakeDir}\n`);
+                            if (ui) {
+                                ui.setCmakeDir(appName, cmakeDir);
+                            } else {
+                                console.log(`  CMake dir: ${cmakeDir}`);
+                            }
             }
         }
 
         // --- cmake --preset=llvm-debug (step 1) ---
         if (appOk && cmakeDir) {
             if (ui) {
-                ui.setStepRunning(appName, 1);
-                appOk = await runCommandFancy('cmake', ['--preset=llvm-debug'], cmakeDir, ui, logStream);
-                ui.setStepDone(appName, 1, appOk);
+                            ui.setStepRunning(appName, 1);
+                            appOk = await runCommandFancy('cmake', ['--preset=llvm-debug'], cmakeDir, ui, logStream);
+                            ui.setStepDone(appName, 1, appOk);
+                            if (!appOk) stepFailed = 1;
             } else {
-                appOk = runCommandPlain('cmake', ['--preset=llvm-debug'], cmakeDir, logStream);
+                            appOk = runCommandPlain('cmake', ['--preset=llvm-debug'], cmakeDir, logStream);
+                            if (!appOk) stepFailed = 1;
             }
         }
 
         // --- cmake --build build/llvm-debug (step 2) ---
         if (appOk && cmakeDir) {
             if (ui) {
-                ui.setStepRunning(appName, 2);
-                appOk = await runCommandFancy('cmake', ['--build', 'build/llvm-debug'], cmakeDir, ui, logStream);
-                ui.setStepDone(appName, 2, appOk);
+                            ui.setStepRunning(appName, 2);
+                            appOk = await runCommandFancy('cmake', ['--build', 'build/llvm-debug'], cmakeDir, ui, logStream);
+                            ui.setStepDone(appName, 2, appOk);
+                            if (!appOk) stepFailed = 2;
             } else {
-                appOk = runCommandPlain('cmake', ['--build', 'build/llvm-debug'], cmakeDir, logStream);
+                            appOk = runCommandPlain('cmake', ['--build', 'build/llvm-debug'], cmakeDir, logStream);
+                            if (!appOk) stepFailed = 2;
             }
         }
 
@@ -618,30 +645,32 @@ async function main(): Promise<void> {
             moveDirSync(appSourceDir, path.join(goodDir, appName));
             passed++;
             if (ui) {
-                ui.setDone(appName, true);
+                            ui.incrementPassed();
+                            ui.setDone(appName, true);
             } else {
-                console.log(`  ✓ ${appName} succeeded`);
-                console.log('');
+                            console.log(`  ✓ ${appName} succeeded`);
+                            console.log('');
             }
         } else {
             failed++;
             failures.push(appName);
             if (ui) {
-                ui.setDone(appName, false);
+                            if (stepFailed >= 0 && stepFailed <= 2) ui.incrementFailedStep(stepFailed as 0 | 1 | 2);
+                            ui.setDone(appName, false);
             } else {
-                console.error(`  ✗ ${appName} failed`);
-                console.log('');
+                            console.error(`  ✗ ${appName} failed`);
+                            console.log('');
             }
             if (args.stopOnError) {
-                if (ui) ui.cleanup();
-                console.error(`Stopped after failure: ${appName} (--stop-on-error)`);
-                process.exit(1);
+                            if (ui) ui.cleanup();
+                            console.error(`Stopped after failure: ${appName} (--stop-on-error)`);
+                            process.exit(1);
             }
             if (cmakeDir && fs.existsSync(cmakeDir)) {
-                fs.rmSync(cmakeDir, { recursive: true, force: true });
+                            fs.rmSync(cmakeDir, { recursive: true, force: true });
             }
             if (fs.existsSync(appSourceDir)) {
-                moveDirSync(appSourceDir, path.join(badDir, appName));
+                            moveDirSync(appSourceDir, path.join(badDir, appName));
             }
         }
     }

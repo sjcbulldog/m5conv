@@ -7,10 +7,16 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "generate:assets": "node dist/index.js",
-    "dev:generate:assets": "ts-node src/index.ts"
+    "dev:generate:assets": "ts-node src/index.ts",
+    "pkg:win11": "npm run build && pkg dist/index.js --targets node18-win-x64 --output ../bin/win11/compass.exe",
+    "pkg:linux": "npm run build && pkg dist/index.js --targets node18-linux-x64 --output ../bin/linux/compass",
+    "pkg:macos": "npm run build && pkg dist/index.js --targets node18-macos-x64 --output ../bin/macos/compass",
+    "pkg:all": "npm run pkg:win11 && npm run pkg:linux && npm run pkg:macos"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "@yao-pkg/pkg": "^6.19.0",
+    "pkg": "^5.8.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.2"
   }

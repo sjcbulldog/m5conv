@@ -8,11 +8,10 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
-    "pkg:build": "npm run build && esbuild dist/index.js --bundle --platform=node --format=cjs --outfile=dist/bundle.cjs && node -e \"require('fs').mkdirSync('../bin',{recursive:true})\"",
-    "pkg:win11": "npm run pkg:build && pkg dist/bundle.cjs --targets node20-win-x64 --output ../bin/cmake2ide.exe",
-    "pkg:linux": "npm run pkg:build && pkg dist/bundle.cjs --targets node20-linux-x64 --output ../bin/cmake2ide",
-    "pkg:macos": "npm run pkg:build && pkg dist/bundle.cjs --targets node20-macos-x64,node20-macos-arm64 --output ../bin/cmake2ide",
-    "pkg:all": "npm run pkg:build && pkg dist/bundle.cjs --targets node20-win-x64,node20-linux-x64,node20-macos-x64,node20-macos-arm64"
+    "pkg:win11": "npm run build && pkg dist/index.js --targets node18-win-x64 --output ../bin/win11/cmake2ide.exe",
+    "pkg:linux": "npm run build && pkg dist/index.js --targets node18-linux-x64 --output ../bin/linux/cmake2ide",
+    "pkg:macos": "npm run build && pkg dist/index.js --targets node18-macos-x64 --output ../bin/macos/cmake2ide",
+    "pkg:all": "npm run pkg:win11 && npm run pkg:linux && npm run pkg:macos"
   },
   "keywords": [],
   "author": "",
