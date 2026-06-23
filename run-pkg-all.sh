@@ -14,7 +14,7 @@ for dir in */; do
   [ -d "$dir" ] || continue
   if [ -f "${dir}package.json" ]; then
     printf "\n==> Running pkg:all in %s\n" "$dir"
-    cd "$dir"
+    pushd "$dir"
     npm install      
     if (npm run pkg:all); then
       printf "Success: %s\n" "$dir"
@@ -22,6 +22,9 @@ for dir in */; do
       printf "Failed: %s\n" "$dir"
       failures+=("$dir")
     fi
+    popd
+  else
+      printf "Ignoring directory: %s\n" "$dir"
   fi
 done
 
