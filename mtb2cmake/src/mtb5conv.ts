@@ -514,6 +514,10 @@ export class MTB5Converter {
             const projName = project.name ;
             const srcProjDir = project.path ;
             const destProjDir = path.join(this.dest_, projName) ;
+            const normSrcProj = path.normalize(srcProjDir) ;
+            const projectIgnorePaths = project.ignorePath()
+                .filter(ip => path.normalize(ip).startsWith(normSrcProj))
+                .map(ip => path.join(destProjDir, path.relative(srcProjDir, ip))) ;
 
             if (!this.cmakeOnly) {
                 this.logger_.info(`Copying project '${projName}' from '${srcProjDir}'`) ;
@@ -536,7 +540,7 @@ export class MTB5Converter {
 
             // Recursively find all directories under the project root that contain
             // header files (*.h) and add each unique directory to the include path.
-            const headerDirs = collectProjectHeaderDirs(destProjDir, destProjDir) ;
+            const headerDirs = collectProjectHeaderDirs(destProjDir, destProjDir, projectIgnorePaths) ;
             for (const d of headerDirs) {
                 projectIncludeDirs.push(d) ;
                 const relLabel = d.path.replace('${CMAKE_CURRENT_SOURCE_DIR}/', '').replace('${CMAKE_CURRENT_SOURCE_DIR}', '.') ;
@@ -618,7 +622,7 @@ export class MTB5Converter {
             }
 
             // Generate CMakeLists.txt for the project
-            const sources = collectSources(destProjDir, destProjDir) ;
+            const sources = collectSources(destProjDir, destProjDir, [], projectIgnorePaths) ;
             const components = project.components ;
 
             // Run 'make codegen' for each toolchain (LLVM_ARM, IAR, GCC_ARM, ARM) in both
@@ -967,9 +971,16 @@ export class MTB5Converter {
         const defaultSignJson = path.join(this.src_, 'configs', 'boot_with_extended_boot.json') ;
         const signJsonPath = this.signCombinePath ?? (fs.existsSync(defaultSignJson) ? defaultSignJson : undefined) ;
 
+        // Resolve BSP independently from sign-combine detection so appinfo.cmake can
+        // always populate MTBBSP/BSPPATH when a BSP is available.
+        try {
+            bspNameResolved = this.resolveBspName() ;
+        } catch {
+            // Keep best-effort behavior: top-level generation can still proceed without BSP.
+        }
+
         if (signJsonPath) {
             try {
-                bspNameResolved = this.resolveBspName() ;
                 signCombineInfo = processSignCombineJson(signJsonPath, this.dest_, this.setOverrides) ;
                 this.logger_.info(`Processed sign-combine config: ${signJsonPath}`) ;
             } catch (err: any) {
