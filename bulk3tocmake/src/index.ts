@@ -20,14 +20,20 @@ interface AppEntry  { name: string; status: AppStatus; steps: [StepInfo, StepInf
 class FancyUI {
     private readonly entries: AppEntry[] = [];
     private viewStart = 0;
-    private readonly topContentRows: number; // rows available for app entries (below header)
-    private readonly maxVisible: number;     // max fully visible app blocks
-    private readonly separatorRow: number;
-    private readonly scrollTop: number;
-    private readonly scrollBottom: number;
-    private readonly totalCols: number;
+    private topContentRows: number = 0; // rows available for app entries (below header)
+    private maxVisible: number = 0;     // max fully visible app blocks
+    private separatorRow: number = 0;
+    private scrollTop: number = 0;
+    private scrollBottom: number = 0;
+    private totalCols: number = 0;
+    private resizeHandler?: () => void;
+    private stdinDataHandler?: (data: Buffer) => void;
 
     constructor() {
+        this.computeLayout();
+    }
+
+    private computeLayout(): void {
         const rows = process.stdout.rows    ?? 24;
         const cols = process.stdout.columns ?? 80;
         this.totalCols      = cols;
@@ -38,6 +44,15 @@ class FancyUI {
         this.separatorRow   = topRows + 1;
         this.scrollTop      = topRows + 2;
         this.scrollBottom   = rows;
+    }
+
+    redraw(): void {
+        this.computeLayout();
+        process.stdout.write('\x1b[2J\x1b[H');
+        process.stdout.write(`\x1b[${this.scrollTop};${this.scrollBottom}r`);
+        this.renderTop();
+        this.renderSeparator();
+        process.stdout.write(`\x1b[${this.scrollBottom};1H`);
     }
 
     init(apps: Array<{ name: string; mtb2cmakeCmd: string }>): void {
@@ -57,6 +72,24 @@ class FancyUI {
         this.renderTop();
         this.renderSeparator();
         process.stdout.write(`\x1b[${this.scrollBottom};1H`);
+
+        // Respond to terminal resize
+        this.resizeHandler = () => this.redraw();
+        process.stdout.on('resize', this.resizeHandler);
+
+        // Respond to Ctrl-L (redraw) and Ctrl-C (exit) via raw stdin
+        if (process.stdin.isTTY) {
+            process.stdin.setRawMode(true);
+            process.stdin.resume();
+            this.stdinDataHandler = (data: Buffer) => {
+                if (data[0] === 0x0c) {       // Ctrl-L
+                    this.redraw();
+                } else if (data[0] === 0x03) { // Ctrl-C — re-raise as SIGINT
+                    process.emit('SIGINT');
+                }
+            };
+            process.stdin.on('data', this.stdinDataHandler);
+        }
     }
 
     private renderTop(): void {
@@ -185,6 +218,16 @@ class FancyUI {
     }
 
     cleanup(): void {
+        if (this.resizeHandler) {
+            process.stdout.off('resize', this.resizeHandler);
+            this.resizeHandler = undefined;
+        }
+        if (this.stdinDataHandler && process.stdin.isTTY) {
+            process.stdin.off('data', this.stdinDataHandler);
+            this.stdinDataHandler = undefined;
+            process.stdin.setRawMode(false);
+            process.stdin.pause();
+        }
         process.stdout.write('\x1b[r');    // reset scroll region
         process.stdout.write('\x1b[?25h'); // show cursor
         process.stdout.write(`\x1b[${this.scrollBottom};1H\n`);
