@@ -61,9 +61,10 @@ export class MTB5Converter {
     // Projects detected to use CMSE TrustZone veneer generation (populated during copyProjects)
     private cmseProjects_ : Set<string> = new Set() ;
 
-    // Top-level shared directories copied from the source app into the destination
-    // and treated similarly to assets so projects can add_subdirectory them.
-    private sharedTopLevelDirs_ : { name: string ; destPath: string }[] = [] ;
+    // Top-level shared directories copied from the source app into the destination.
+    // Sources from these dirs are inlined directly into each project that references
+    // them via MTB_SEARCH rather than being compiled as a separate library.
+    private sharedTopLevelDirs_ : { name: string ; srcDir: string ; destPath: string }[] = [] ;
 
     // Public accessor for the final destination directory chosen by the converter.
     public getGeneratedDir(): string {
@@ -443,32 +444,10 @@ export class MTB5Converter {
                 this.logger_.warn(`Shared directory '${entry.name}' not found in destination - skipping`) ;
                 continue ;
             }
-            // Generate CMakeLists for the shared directory like an asset so projects
-            // can add_subdirectory() it and link against the resulting target.
-            const sources = collectSources(destDir, destDir) ;
-            const headers = collectHeaders(destDir, destDir) ;
-            const libraries = collectLibraries(destDir, destDir) ;
-            const includeDirs = collectProjectHeaderDirs(destDir, destDir) ;
-            // Ensure BSP include dirs are present so shared directories that reference
-            // BSP-provided headers (bsp root and config/GeneratedSource) resolve correctly
-            // when the shared asset is add_subdirectory()'d by a project.
-            const bspInc = '${BSP_DIR}' ;
-            const bspGenInc = '${BSP_DIR}/config/GeneratedSource' ;
-            const hasBsp = includeDirs.some(d => d.path === bspInc) ;
-            const hasBspGen = includeDirs.some(d => d.path === bspGenInc) ;
-            if (!hasBsp) includeDirs.push({ path: bspInc, conditions: [] }) ;
-            if (!hasBspGen) includeDirs.push({ path: bspGenInc, conditions: [] }) ;
-            if (sources.length > 0) {
-                generateObjectLibraryCMakeLists(destDir, entry.name, sources, includeDirs, [], libraries) ;
-                this.logger_.info(`Generated CMakeLists.txt for shared directory '${entry.name}'`) ;
-            } else if (libraries.length > 0) {
-                generateLibraryAssetCMakeLists(destDir, entry.name, libraries, includeDirs) ;
-                this.logger_.info(`Generated library-only CMakeLists.txt for shared directory '${entry.name}'`) ;
-            } else {
-                generateHeaderOnlyCMakeLists(destDir, entry.name, includeDirs) ;
-                this.logger_.info(`Generated header-only CMakeLists.txt for shared directory '${entry.name}'`) ;
-            }
-            this.sharedTopLevelDirs_.push({ name: entry.name, destPath: destDir }) ;
+            // Collect sources from the destination dir for inline use in projects.
+            // No CMakeLists.txt library is generated — sources are inlined directly
+            // into each project that lists this directory in its MTB_SEARCH path.
+            this.sharedTopLevelDirs_.push({ name: entry.name, srcDir: srcDir, destPath: destDir }) ;
         }
     }
 
@@ -607,22 +586,27 @@ export class MTB5Converter {
                 }
             }
 
-            // Add top-level shared directories as asset subdirectories so projects
-            // build and link them like normal assets. Skip names already seen.
+            // Add top-level shared directory sources directly into the project
+            // if the shared dir is part of this project's MTB_SEARCH path.
+            const projectSearchPathsNorm = project.searchPath().map(p => path.normalize(p)) ;
+
+            // Collect project-level sources, then inline sources from shared top-level
+            // directories that this project references via MTB_SEARCH.
+            let sources = collectSources(destProjDir, destProjDir, [], projectIgnorePaths) ;
             for (const shared of this.sharedTopLevelDirs_) {
-                if (seenAssets.has(shared.name)) continue ;
-                const relativePath = path.relative(destProjDir, shared.destPath).replace(/\\/g, '/') ;
-                this.logger_.info(`  Adding shared directory to project: ${shared.name} -> ${relativePath}`) ;
-                assetSubs.push({
-                    name: shared.name,
-                    relativePath,
-                    targetName: `${projName}_cm33_${shared.name}`,
-                    bspName: undefined
-                }) ;
+                if (!projectSearchPathsNorm.includes(path.normalize(shared.srcDir))) continue ;
+                if (!fs.existsSync(shared.destPath)) {
+                    this.logger_.warn(`  Shared directory '${shared.name}' not found in destination - skipping`) ;
+                    continue ;
+                }
+                this.logger_.info(`  Inlining shared directory '${shared.name}' sources into project '${projName}'`) ;
+                const sharedIgnorePaths = project.ignorePath()
+                    .filter(ip => path.normalize(ip).startsWith(path.normalize(shared.srcDir)))
+                    .map(ip => path.join(shared.destPath, path.relative(shared.srcDir, ip))) ;
+                sources.push(...collectSources(shared.destPath, destProjDir, [], sharedIgnorePaths)) ;
+                projectIncludeDirs.push(...collectProjectHeaderDirs(shared.destPath, destProjDir)) ;
             }
 
-            // Generate CMakeLists.txt for the project
-            const sources = collectSources(destProjDir, destProjDir, [], projectIgnorePaths) ;
             const components = project.components ;
 
             // Run 'make codegen' for each toolchain (LLVM_ARM, IAR, GCC_ARM, ARM) in both

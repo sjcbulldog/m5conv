@@ -2391,6 +2391,15 @@ export function generateProjectCMakeLists(
         lines.push(')') ;
     }
 
+    // Add the BSP generated source directory to the linker search path for all
+    // compilers so that linker scripts in config/GeneratedSource can be found.
+    if (bspName) {
+        lines.push('') ;
+        lines.push('target_link_directories(${APPNAME} PRIVATE') ;
+        lines.push('    ${BSPPATH}/config/GeneratedSource') ;
+        lines.push(')') ;
+    }
+
     // CMSE TrustZone NSC veneer generation (secure project only).
     // The link step writes a fresh veneer to a .tmp file in the build tree;
     // the custom command promotes it to nsc_veneer.o in the project source

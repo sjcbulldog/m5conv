@@ -14,7 +14,7 @@
                 "--force",
                 "--target", "gcc,iar,llvm,arm",
                 "--depends", "${workspaceFolder}/depends.json",
-                "--source", "c:/mtb4/proj3/KIT_PSE84_EVAL_EPC2/${input:mtbProjectName}",
+                "--source", "c:/mtb4/proj3/KIT_PSE84_EVAL_EPC2/bad/${input:mtbProjectName}",
                 "--dest", "c:/mtb4/proj4/b99",
             ]
         }

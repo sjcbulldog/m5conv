@@ -66,7 +66,8 @@
         "name" : "cmsis",
         "exports" : [
             "Core/Include",
-            "Core/Include/m-profile"
+            "Core/Include/m-profile",
+            "COMPONENT_CMSIS_DSP/Include"
         ],
         "imports" : []
     },
@@ -946,7 +947,8 @@
     {
         "name" : "audio-codec-tlv320dac3100",
         "exports" : [
-            "include"
+            "include",
+            "."
         ],
         "imports" : [
             "core-lib",
@@ -964,7 +966,8 @@
     {
         "name" : "audio-front-end",
         "exports" : [
-            "include"
+            "include",
+            "source/include"
         ],
         "imports" : [
             "core-lib",
@@ -1000,7 +1003,9 @@
     {
         "name" : "audio-voice-core",
         "exports" : [
-            "include"
+            "include",
+            "lib/SP_ENH/COMPONENT_CM55/src/inc",
+            "lib/SP_ENH/COMPONENT_CM55/inc"
         ],
         "imports" : [
             "core-lib",
