@@ -10,7 +10,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
-        "pkg:win": "npm run build && pkg dist/index.js --targets node18-win-x64 --output ../bin/win11/mtb3create.exe",
+    "pkg:win": "npm run build && pkg dist/index.js --targets node18-win-x64 --output ../bin/win11/mtb3create.exe",
     "pkg:mac": "npm run build && pkg dist/index.js --targets node18-macos-x64 --output ../bin/macos/mtb3create",
     "pkg:linux": "npm run build && pkg dist/index.js --targets node18-linux-x64 --output ../bin/linux/mtb3create",
     "pkg:all": "npm run pkg:win && npm run pkg:mac && npm run pkg:linux"
@@ -18,10 +18,6 @@
   "devDependencies": {
     "@types/node": "^22.10.2",
     "ts-node": "^10.9.2",
-    "typescript": "^5.8.3",
-    "@yao-pkg/pkg": "^6.19.0"
-  },
-  "dependencies": {
-    "pkg": "^5.8.0"
-  }
+    "typescript": "^5.8.3"
+   }
 }

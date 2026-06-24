@@ -17,8 +17,6 @@
   "license": "ISC",
   "devDependencies": {
     "@types/node": "^25.2.3",
-    "@yao-pkg/pkg": "^6.19.0",
-    "pkg": "^5.8.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   }
