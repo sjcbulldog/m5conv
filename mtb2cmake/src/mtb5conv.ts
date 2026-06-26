@@ -61,6 +61,11 @@ export class MTB5Converter {
     // Projects detected to use CMSE TrustZone veneer generation (populated during copyProjects)
     private cmseProjects_ : Set<string> = new Set() ;
 
+    // Preset names (e.g. 'gcc-debug', 'llvm-release') for which at least one project had
+    // successful make codegen output.  Populated during copyProjects(); used by generateTopLevel()
+    // to filter unsupported configurations out of CMakePresets.json.
+    private supportedPresets_ : Set<string> = new Set() ;
+
     // Top-level shared directories copied from the source app into the destination.
     // Sources from these dirs are inlined directly into each project that references
     // them via MTB_SEARCH rather than being compiled as a separate library.
@@ -616,6 +621,13 @@ export class MTB5Converter {
             const codegenResult = await this.runMakeCodegenForProject(srcProjDir) ;
             const flagsByToolchain = codegenResult.flags ;
 
+            const toolchainToPresetName: Record<string, string> = {
+                GCC_ARM:  'gcc',
+                IAR:      'iar',
+                LLVM_ARM: 'llvm',
+                ARM:      'arm',
+            } ;
+
             const toolchainNames = Object.keys(flagsByToolchain) ;
             if (toolchainNames.length > 0) {
                 const fmt = (fs: { debugFile?: string ; releaseFile?: string }, name: string) =>
@@ -637,6 +649,22 @@ export class MTB5Converter {
                         if (libCount > 0) {
                             this.logger_.info(`  [${tc}] ldlibs: ${libCount} unique entr${libCount === 1 ? 'y' : 'ies'} (veneer consumer)`) ;
                         }
+                    }
+
+                    // Track which (toolchain, config) combinations produced flags so that
+                    // generateTopLevel() can exclude unsupported presets from CMakePresets.json.
+                    const shortName = toolchainToPresetName[tc] ;
+                    if (shortName) {
+                        const hasDebug = !!(
+                            fbc.c.debugFile || fbc.asm.debugFile || fbc.cxx.debugFile ||
+                            fbc.link.debugFile || fbc.libs.debugFile
+                        ) ;
+                        const hasRelease = !!(
+                            fbc.c.releaseFile || fbc.asm.releaseFile || fbc.cxx.releaseFile ||
+                            fbc.link.releaseFile || fbc.libs.releaseFile
+                        ) ;
+                        if (hasDebug)   this.supportedPresets_.add(`${shortName}-debug`) ;
+                        if (hasRelease) this.supportedPresets_.add(`${shortName}-release`) ;
                     }
                 }
             } else {
@@ -1004,7 +1032,7 @@ export class MTB5Converter {
             this.logger_.info('Generated toolchains/arm.cmake') ;
         }
 
-        generateCMakePresetsFile(this.dest_) ;
+        generateCMakePresetsFile(this.dest_, this.supportedPresets_.size > 0 ? this.supportedPresets_ : undefined) ;
         this.logger_.info('Generated CMakePresets.json') ;
 
         // Resolve BSP name for launch.json search dirs (best-effort; skipped if

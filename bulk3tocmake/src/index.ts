@@ -264,7 +264,6 @@ function buildMtb2CmakeArgs(
         '--dest', dest,
         '--target', 'gcc,llvm,iar,arm',
         '--depends', dependsJson,
-        '--force',
         '--generated-dir', generatedDirFile,
     ];
 }

@@ -36,6 +36,18 @@ type RunStats = {
   bspsSkipped: number;
 };
 
+type ComponentScope = "local" | "global";
+
+type ComponentEntry = {
+  name: string;
+  type: ComponentScope;
+  description: string;
+};
+
+type ComponentsManifest = {
+  components: ComponentEntry[];
+};
+
 class Logger {
   private readonly level: "quiet" | "info" | "verbose";
 
@@ -232,10 +244,30 @@ function processApplications(opts: CliOptions, logger: Logger, stats: RunStats):
     upsertApplication(appInfo, appsOutDir, assetsOutDir, bspsOutDir, logger, stats);
     stats.appsProcessed += 1;
   }
+
+  generateComponentManifests(appsOutDir, assetsOutDir, logger);
+}
+
+function readAppNameJson(appDir: string): string | null {
+  const appNamePath = path.join(appDir, "appname.json");
+  if (!fs.existsSync(appNamePath)) {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(appNamePath, "utf8"));
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") {
+    return null;
+  }
+  const appname = (parsed as Record<string, unknown>).appname;
+  return typeof appname === "string" && appname.length > 0 ? appname : null;
 }
 
 function analyzeInputApp(appDir: string): InputAppInfo {
-  const appName = path.basename(appDir);
+  const appName = readAppNameJson(appDir) ?? path.basename(appDir);
   const projectDirs = findProjectDirectories(appDir);
   if (projectDirs.length === 0) {
     throw new Error(`Application has no projects with firmware.cmake: ${appName}`);
@@ -450,7 +482,7 @@ function copyAppTemplateStripped(sourceAppPath: string, destAppPath: string): vo
   const entries = fs.readdirSync(sourceAppPath, { withFileTypes: true });
 
   for (const ent of entries) {
-    if (ent.name === "assets" || ent.name === "bsps") {
+    if (ent.name === "assets" || ent.name === "bsps" || ent.name === "appname.json") {
       continue;
     }
 
@@ -646,6 +678,63 @@ function copyBspsForApplication(app: InputAppInfo, bspsOutDir: string, logger: L
     stats.bspsCopied += 1;
     logger.verbose(`Copied BSP: ${dstDirName}`);
   }
+}
+
+function collectComponentNamesInDir(dir: string, found: Set<string>): void {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name.startsWith("COMPONENT_")) {
+      found.add(entry.name);
+    }
+    collectComponentNamesInDir(path.join(dir, entry.name), found);
+  }
+}
+
+function getComponentNamesForDir(dir: string): string[] {
+  const found = new Set<string>();
+  collectComponentNamesInDir(dir, found);
+  return [...found].sort();
+}
+
+function generateComponentManifests(appsOutDir: string, assetsOutDir: string, logger: Logger): void {
+  const componentsByDir = new Map<string, string[]>();
+
+  const scanSubdirs = (parentDir: string): void => {
+    if (!fs.existsSync(parentDir)) return;
+    for (const ent of fs.readdirSync(parentDir, { withFileTypes: true })) {
+      if (!ent.isDirectory()) continue;
+      const dir = path.join(parentDir, ent.name);
+      componentsByDir.set(dir, getComponentNamesForDir(dir));
+    }
+  };
+
+  scanSubdirs(appsOutDir);
+  scanSubdirs(assetsOutDir);
+
+  // Build component -> set of dirs that contain it (across all apps and assets)
+  const componentToOwners = new Map<string, Set<string>>();
+  for (const [dir, components] of componentsByDir) {
+    for (const comp of components) {
+      if (!componentToOwners.has(comp)) {
+        componentToOwners.set(comp, new Set());
+      }
+      componentToOwners.get(comp)!.add(dir);
+    }
+  }
+
+  for (const [dir, componentNames] of componentsByDir) {
+    const entries: ComponentEntry[] = componentNames.map((name) => ({
+      name,
+      type: (componentToOwners.get(name)?.size ?? 0) > 1 ? "global" : "local",
+      description: "TBD",
+    }));
+    const manifest: ComponentsManifest = { components: entries };
+    const filePath = path.join(dir, "components.json");
+    fs.writeFileSync(filePath, JSON.stringify(manifest, null, 2) + "\n", "utf8");
+    logger.verbose(`Wrote components.json for ${path.basename(dir)} (${componentNames.length} component(s))`);
+  }
+
+  logger.info(`Generated components.json for ${componentsByDir.size} app(s)/asset(s).`);
 }
 
 function stripTargetAppPrefix(name: string): string {

@@ -9,13 +9,13 @@ interface ComponentEntry {
   description: string;
 }
 
-interface AssetManifest {
+interface ComponentsManifest {
   components: ComponentEntry[];
 }
 
 const COMPONENT_PREFIX = "COMPONENT_";
 const DEFAULT_ASSETS_DIR = "assets";
-const MANIFEST_FILE = "asset.json";
+const MANIFEST_FILE = "components.json";
 const DESCRIPTION_TEMPLATE = "TBD";
 
 interface CliOptions {
@@ -120,11 +120,11 @@ function buildComponentAssetIndex(assetComponentsMap: Map<string, string[]>): Ma
   return componentToAssets;
 }
 
-function ensureStableJson(data: AssetManifest): string {
+function ensureStableJson(data: ComponentsManifest): string {
   return `${JSON.stringify(data, null, 2)}\n`;
 }
 
-function createManifestForAsset(componentNames: string[], componentAssetIndex: Map<string, Set<string>>): AssetManifest {
+function createManifestForAsset(componentNames: string[], componentAssetIndex: Map<string, Set<string>>): ComponentsManifest {
   const components: ComponentEntry[] = componentNames.map((componentName) => {
     const referencingAssets = componentAssetIndex.get(componentName);
     const type: ComponentScope = referencingAssets && referencingAssets.size > 1 ? "global" : "local";
@@ -139,7 +139,7 @@ function createManifestForAsset(componentNames: string[], componentAssetIndex: M
   return { components };
 }
 
-function writeManifest(assetDir: string, manifest: AssetManifest): void {
+function writeManifest(assetDir: string, manifest: ComponentsManifest): void {
   const filePath = path.join(assetDir, MANIFEST_FILE);
   fs.writeFileSync(filePath, ensureStableJson(manifest), "utf8");
 }

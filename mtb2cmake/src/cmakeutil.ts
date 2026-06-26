@@ -3199,7 +3199,7 @@ export function generateArmToolchainCMake(destDir: string) : void {
 // descriptive display names; any other .cmake files found are included with
 // a generic display name derived from the filename.
 //
-export function generateCMakePresetsFile(destDir: string) : void {
+export function generateCMakePresetsFile(destDir: string, supportedPresets?: Set<string>) : void {
     interface ConfigurePreset {
         name: string ;
         displayName: string ;
@@ -3234,6 +3234,9 @@ export function generateCMakePresetsFile(destDir: string) : void {
         const known = knownToolchains[name] ;
         for (const [buildType, suffix] of [['Debug', 'debug'], ['Release', 'release']] as [string, string][]) {
             const presetName = `${name}-${suffix}` ;
+            if (supportedPresets && !supportedPresets.has(presetName)) {
+                continue ;
+            }
             configurePresets.push({
                 name: presetName,
                 displayName: `${known?.displayName ?? name} ${buildType}`,
