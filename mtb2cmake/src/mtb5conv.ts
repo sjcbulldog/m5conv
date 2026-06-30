@@ -1,5 +1,5 @@
 import { ModusToolboxEnvironment, MTBLoadFlags } from "./mtbenv";
-import { collectSources, collectHeaders, collectLibraries, collectProjectHeaderDirs, generateObjectLibraryCMakeLists, generateHeaderOnlyCMakeLists, generateLibraryAssetCMakeLists, generateProjectCMakeLists, generateTopLevelCMakeLists, generateMtbCMake, generateAppInfoCMake, generateProjInfoCMake, generateGccToolchainCMake, generateIarToolchainCMake, generateLlvmToolchainCMake, generateArmToolchainCMake, generateBspCMakeInclude, generateCMakePresetsFile, generateVSCodeLaunchJson, generateVSCodeTasksJson, generateVSCodeSettingsJson, AssetSubdirectory, loadDependsDB, resolveIncludeDirs, resolveAssetExports, resolveAssetInternals, hasActiveSources, readProjectDefinesByConfig, readProjectDefinesForConfig, fixDefineFilePaths, readProjectFlagsByConfig, readProjectFlagsForConfig, mergeProjectFlagsByConfig, remapFlagPaths, ProjectFlagsByConfig, ProjectFlagsByToolchain, DependsEntry, ConditionalIncludeDir, processSignCombineJson, SignCombineInfo, generateWifiHostDriverResourceDefines } from './cmakeutil';
+import { collectSources, collectHeaders, collectLibraries, collectProjectHeaderDirs, generateObjectLibraryCMakeLists, generateHeaderOnlyCMakeLists, generateLibraryAssetCMakeLists, generateProjectCMakeLists, generateTopLevelCMakeLists, generateMtbCMake, generateAppInfoCMake, generateProjInfoCMake, generateProjectToolchainsCMake, generateGccToolchainCMake, generateIarToolchainCMake, generateLlvmToolchainCMake, generateArmToolchainCMake, generateBspCMakeInclude, generateCMakePresetsFile, generateVSCodeLaunchJson, generateVSCodeTasksJson, generateVSCodeSettingsJson, AssetSubdirectory, loadDependsDB, resolveIncludeDirs, resolveAssetExports, resolveAssetInternals, hasActiveSources, readProjectDefinesByConfig, readProjectDefinesForConfig, fixDefineFilePaths, readProjectFlagsByConfig, readProjectFlagsForConfig, mergeProjectFlagsByConfig, remapFlagPaths, ProjectFlagsByConfig, ProjectFlagsByToolchain, DependsEntry, ConditionalIncludeDir, processSignCombineJson, SignCombineInfo, generateWifiHostDriverResourceDefines } from './cmakeutil';
 import { MTBAssetRequest, MTBAssetStorageFormat } from './mtbenv/appdata/mtbassetreq';
 import { MTBUtils } from './mtbenv/misc/mtbutils';
 import * as winston from 'winston';
@@ -723,6 +723,8 @@ export class MTB5Converter {
 
             generateProjectCMakeLists(destProjDir, projName, sources, assetSubs, projectIncludeDirs, resolvedBspName, components, flagsByToolchain, debugDefines, releaseDefines, dependsDB) ;
             this.logger_.info(`Generated CMakeLists.txt for project '${projName}'`) ;
+            generateProjectToolchainsCMake(destProjDir, flagsByToolchain, debugDefines, releaseDefines, components) ;
+            this.logger_.info(`Generated toolchains cmake files for project '${projName}'`) ;
             generateProjInfoCMake(destProjDir, components) ;
             this.logger_.info(`Generated projinfo.cmake for project '${projName}'`) ;
         }

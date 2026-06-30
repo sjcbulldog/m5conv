@@ -2142,111 +2142,11 @@ export function generateProjectCMakeLists(
     lines.push('include(${CMAKE_CURRENT_SOURCE_DIR}/projinfo.cmake)') ;
     lines.push('') ;
 
-    // Emit per-toolchain add_compile_options / add_link_options blocks derived
-    // from running 'make codegen TOOLCHAIN=<t> CONFIG=<c>' for each combination.
-    // Each block is guarded by  if(MTBTOOLCHAIN STREQUAL "<t>")  so that only the
-    // flags matching the active toolchain are applied at CMake configure time.
-    if (flagsByToolchain && Object.keys(flagsByToolchain).length > 0) {
-        const toolchains = Object.keys(flagsByToolchain).sort() ;
-
-        interface ToolchainBlock {
-            toolchain: string ;
-            compileLines: string[] ;
-            linkLines: string[] ;
-        }
-        const blocks: ToolchainBlock[] = [] ;
-
-        // Build sets of define names already covered by add_compile_definitions
-        // (derived from the project's Debug/Release .defines files) so we can
-        // skip duplicates in the per-toolchain add_compile_options block.
-        const defName     = (d: string) => { const i = d.indexOf('=') ; return i >= 0 ? d.substring(0, i) : d ; } ;
-        const flagDefName = (f: string) => defName(f.substring(2)) ; // strip leading -D
-        const debugDefineNames   = new Set(debugDefines.map(defName)) ;
-        const releaseDefineNames = new Set(releaseDefines.map(defName)) ;
-
-        for (const toolchain of toolchains) {
-            const fbc = flagsByToolchain[toolchain] ;
-            const langDefs: Array<{ lang: string ; flags: ConfigFlagSet }> = [
-                { lang: 'C',   flags: fbc.c },
-                { lang: 'ASM', flags: fbc.asm },
-                { lang: 'CXX', flags: fbc.cxx },
-            ] ;
-            const compileLines: string[] = [] ;
-            for (const { lang, flags } of langDefs) {
-                const { common, debugOnly, releaseOnly } = splitByConfig(flags) ;
-                for (const f of common) {
-                    // armasm does not support -D or -I; skip these flags for ARM ASM.
-                    if (toolchain === 'ARM' && lang === 'ASM' && (f.startsWith('-D') || f.startsWith('-I'))) continue ;
-                    // Deduplicate -D flags already emitted by add_compile_definitions.
-                    // A "common" flag is present in both Debug and Release asflags, so it would be
-                    // emitted unconditionally.  If add_compile_definitions already covers it for one
-                    // or both configs, restrict (or remove) the asflags entry accordingly.
-                    if (f.startsWith('-D')) {
-                        const name = flagDefName(f) ;
-                        const inDbg = debugDefineNames.has(name) ;
-                        const inRel = releaseDefineNames.has(name) ;
-                        if (inDbg && inRel) continue ; // fully covered — drop entirely
-                        if (inDbg) {
-                            // Covered for Debug only → emit for Release only from asflags.
-                            compileLines.push(`        $<$<AND:$<COMPILE_LANGUAGE:${lang}>,$<CONFIG:Release>>:${f}>`) ;
-                            continue ;
-                        }
-                        if (inRel) {
-                            // Covered for Release only → emit for Debug only from asflags.
-                            compileLines.push(`        $<$<AND:$<COMPILE_LANGUAGE:${lang}>,$<CONFIG:Debug>>:${f}>`) ;
-                            continue ;
-                        }
-                    }
-                    compileLines.push(`        $<$<COMPILE_LANGUAGE:${lang}>:${f}>`) ;
-                }
-                for (const f of debugOnly) {
-                    // armasm does not support -D or -I; skip these flags for ARM ASM.
-                    if (toolchain === 'ARM' && lang === 'ASM' && (f.startsWith('-D') || f.startsWith('-I'))) continue ;
-                    // Skip -D flags already emitted by add_compile_definitions for Debug.
-                    if (f.startsWith('-D') && debugDefineNames.has(flagDefName(f))) continue ;
-                    compileLines.push(`        $<$<AND:$<COMPILE_LANGUAGE:${lang}>,$<CONFIG:Debug>>:${f}>`) ;
-                }
-                for (const f of releaseOnly) {
-                    // armasm does not support -D or -I; skip these flags for ARM ASM.
-                    if (toolchain === 'ARM' && lang === 'ASM' && (f.startsWith('-D') || f.startsWith('-I'))) continue ;
-                    // Skip -D flags already emitted by add_compile_definitions for Release.
-                    if (f.startsWith('-D') && releaseDefineNames.has(flagDefName(f))) continue ;
-                    compileLines.push(`        $<$<AND:$<COMPILE_LANGUAGE:${lang}>,$<CONFIG:Release>>:${f}>`) ;
-                }
-            }
-
-            const { common: lc, debugOnly: ld, releaseOnly: lr } = splitByConfig(fbc.link) ;
-            const linkLines: string[] = [] ;
-            for (const f of lc) linkLines.push(`        ${f}`) ;
-            for (const f of ld) linkLines.push(`        $<$<CONFIG:Debug>:${f}>`) ;
-            for (const f of lr) linkLines.push(`        $<$<CONFIG:Release>:${f}>`) ;
-
-            if (compileLines.length > 0 || linkLines.length > 0) {
-                blocks.push({ toolchain, compileLines, linkLines }) ;
-            }
-        }
-
-        if (blocks.length > 0) {
-            lines.push('') ;
-            for (let i = 0; i < blocks.length; i++) {
-                const { toolchain, compileLines, linkLines } = blocks[i] ;
-                const keyword = i === 0 ? 'if' : 'elseif' ;
-                lines.push(`${keyword}(MTBTOOLCHAIN STREQUAL "${toolchain}")`) ;
-                if (compileLines.length > 0) {
-                    lines.push('    add_compile_options(') ;
-                    lines.push(...compileLines) ;
-                    lines.push('    )') ;
-                }
-                if (linkLines.length > 0) {
-                    lines.push('    add_link_options(') ;
-                    lines.push(...linkLines) ;
-                    lines.push('    )') ;
-                }
-            }
-            lines.push('endif()') ;
-        }
-    }
-
+    // Include per-toolchain compile and link options from the project's own
+    // toolchains/${MTBTOOLCHAIN}.cmake file generated alongside this file.
+    // The file is OPTIONAL so that a project without codegen output still
+    // configures without error.
+    lines.push('include(${CMAKE_CURRENT_SOURCE_DIR}/toolchains/${MTBTOOLCHAIN}.cmake OPTIONAL)') ;
     lines.push('') ;
     lines.push(`set(APPNAME ${projectName}.elf)`) ;
     lines.push('') ;
@@ -2254,50 +2154,6 @@ export function generateProjectCMakeLists(
     lines.push('    set(CMAKE_BUILD_TYPE Debug)') ;
     lines.push('endif()') ;
     lines.push('') ;
-
-    // Add project-specific defines (from Debug/Release .defines files) using
-    // add_compile_definitions so they propagate to child directories.
-    // Generator expressions select the correct set for each build configuration.
-    const commonDefines      = debugDefines.filter(d => releaseDefines.includes(d)) ;
-    const debugOnlyDefines   = debugDefines.filter(d => !releaseDefines.includes(d)) ;
-    const releaseOnlyDefines = releaseDefines.filter(d => !debugDefines.includes(d)) ;
-
-    const hasConfigDefines =
-        commonDefines.length > 0 || debugOnlyDefines.length > 0 || releaseOnlyDefines.length > 0 ;
-
-    if (hasConfigDefines) {
-        // Generator expression condition: NOT (ARM toolchain AND ASM language).
-        // armasm does not accept -D flags, so all defines must be excluded for ARM ASM.
-        const armAsmNot = `$<NOT:$<AND:$<STREQUAL:\${MTBTOOLCHAIN},ARM>,$<COMPILE_LANGUAGE:ASM>>>` ;
-        lines.push('add_compile_definitions(') ;
-        for (const def of commonDefines) {
-            if (def.includes('=')) {
-                lines.push(`    $<$<NOT:$<COMPILE_LANGUAGE:ASM>>:${safeGenexDef(def)}>`) ;
-            } else {
-                lines.push(`    $<${armAsmNot}:${def}>`) ;
-            }
-        }
-        for (const def of debugOnlyDefines) {
-            if (def.includes('=')) {
-                lines.push(`    $<$<AND:$<CONFIG:Debug>,$<NOT:$<COMPILE_LANGUAGE:ASM>>>:${safeGenexDef(def)}>`) ;
-            } else {
-                lines.push(`    $<$<AND:$<CONFIG:Debug>,${armAsmNot}>:${def}>`) ;
-            }
-        }
-        for (const def of releaseOnlyDefines) {
-            if (def.includes('=')) {
-                lines.push(`    $<$<AND:$<CONFIG:Release>,$<NOT:$<COMPILE_LANGUAGE:ASM>>>:${safeGenexDef(def)}>`) ;
-            } else if (def === 'NDEBUG') {
-                // IAR: CMake automatically adds -DNDEBUG for Release builds, so skip it here
-                // to avoid a duplicate definition error.
-                lines.push(`    $<$<AND:$<CONFIG:Release>,$<NOT:$<C_COMPILER_ID:IAR>>,${armAsmNot}>:${def}>`) ;
-            } else {
-                lines.push(`    $<$<AND:$<CONFIG:Release>,${armAsmNot}>:${def}>`) ;
-            }
-        }
-        lines.push(')') ;
-        lines.push('') ;
-    }
 
     // Set BSP_DIR from BSPPATH (defined in appinfo.cmake) — can be overridden on the
     // command line with -DBSP_DIR=... or by overriding MTBBSP.
@@ -2841,10 +2697,207 @@ export function generateAppInfoCMake(
 }
 
 //
+// Generate per-toolchain cmake files inside a project's toolchains/ directory.
+// Each file is named after the ModusToolbox toolchain identifier
+// (e.g. toolchains/GCC_ARM.cmake, toolchains/IAR.cmake) and contains only
+// add_compile_options() and add_link_options() derived from running
+// 'make codegen TOOLCHAIN=<t> CONFIG=<c>'.  The project's CMakeLists.txt
+// includes the appropriate file at configure time via:
+//   include(${CMAKE_CURRENT_SOURCE_DIR}/toolchains/${MTBTOOLCHAIN}.cmake OPTIONAL)
+//
+// debugDefines / releaseDefines are the project-level defines already emitted
+// via add_compile_definitions() in CMakeLists.txt; any -D flags in the codegen
+// output that duplicate those defines are suppressed here to avoid redundancy.
+//
+export function generateProjectToolchainsCMake(
+    targetDir: string,
+    flagsByToolchain: ProjectFlagsByToolchain,
+    debugDefines: string[] = [],
+    releaseDefines: string[] = [],
+    components: string[] = []
+) : void {
+    const TOOLCHAIN_COMPONENTS_SET = new Set(['GCC_ARM', 'IAR', 'LLVM_ARM', 'ARM']) ;
+    const STANDARD_TOOLCHAINS = ['ARM', 'GCC_ARM', 'IAR', 'LLVM_ARM'] ;
+
+    const hasFlags = flagsByToolchain && Object.keys(flagsByToolchain).length > 0 ;
+    const hasDefines =
+        components.length > 0 || debugDefines.length > 0 || releaseDefines.length > 0 ;
+    if (!hasFlags && !hasDefines) return ;
+
+    const defName     = (d: string) => { const i = d.indexOf('=') ; return i >= 0 ? d.substring(0, i) : d ; } ;
+    const flagDefName = (f: string) => defName(f.substring(2)) ; // strip leading -D
+    const debugDefineNames   = new Set(debugDefines.map(defName)) ;
+    const releaseDefineNames = new Set(releaseDefines.map(defName)) ;
+
+    // Pre-compute define buckets used per-toolchain.
+    const sortedCompDefs = [...components]
+        .filter(c => !TOOLCHAIN_COMPONENTS_SET.has(c))
+        .sort() ;
+    const commonDefines      = debugDefines.filter(d => releaseDefines.includes(d)) ;
+    const debugOnlyDefines   = debugDefines.filter(d => !releaseDefines.includes(d)) ;
+    const releaseOnlyDefines = releaseDefines.filter(d => !debugDefines.includes(d)) ;
+    const hasConfigDefines   =
+        commonDefines.length > 0 || debugOnlyDefines.length > 0 || releaseOnlyDefines.length > 0 ;
+
+    const toolchainsDir = path.join(targetDir, 'toolchains') ;
+    fs.mkdirSync(toolchainsDir, { recursive: true }) ;
+
+    // When codegen produced flags, write a file for each toolchain that succeeded.
+    // When codegen produced no flags but there are defines (e.g. components), write
+    // minimal files for the full standard set so the defines are still applied.
+    const toolchainList = hasFlags
+        ? Object.keys(flagsByToolchain).sort()
+        : STANDARD_TOOLCHAINS ;
+
+    for (const toolchain of toolchainList) {
+        const fbc = hasFlags ? flagsByToolchain[toolchain] : undefined ;
+        const isArm = toolchain === 'ARM' ;
+        const isIar = toolchain === 'IAR' ;
+
+        const lines: string[] = [] ;
+        lines.push(`# Compile and link options for the ${toolchain} toolchain.`) ;
+        lines.push(`# Included by the project CMakeLists.txt when MTBTOOLCHAIN is "${toolchain}".`) ;
+        lines.push('') ;
+
+        // --- COMPONENT defines ---
+        // armasm (ARM toolchain) does not accept -D flags, so all defines for ARM ASM
+        // are wrapped with $<$<NOT:$<COMPILE_LANGUAGE:ASM>>:...>.  For all other
+        // toolchains the genex can be omitted entirely since they are not ARM.
+        if (sortedCompDefs.length > 0 || true /* always emit COMPONENT_<TOOLCHAIN> */) {
+            lines.push('add_compile_definitions(') ;
+            for (const comp of sortedCompDefs) {
+                const name = `COMPONENT_${comp.replace(/-/g, '_')}` ;
+                lines.push(isArm
+                    ? `    $<$<NOT:$<COMPILE_LANGUAGE:ASM>>:${name}>`
+                    : `    ${name}`) ;
+            }
+            // COMPONENT_<TOOLCHAIN> is specific to this file's toolchain.
+            const tcComp = `COMPONENT_${toolchain}` ;
+            lines.push(isArm
+                ? `    $<$<NOT:$<COMPILE_LANGUAGE:ASM>>:${tcComp}>`
+                : `    ${tcComp}`) ;
+            lines.push(')') ;
+            lines.push('') ;
+        }
+
+        // --- Config defines (from Debug/Release .defines files) ---
+        if (hasConfigDefines) {
+            lines.push('add_compile_definitions(') ;
+            for (const def of commonDefines) {
+                if (def.includes('=')) {
+                    // Defines with a value cannot be passed to ASM for any toolchain.
+                    lines.push(`    $<$<NOT:$<COMPILE_LANGUAGE:ASM>>:${safeGenexDef(def)}>`) ;
+                } else if (isArm) {
+                    lines.push(`    $<$<NOT:$<COMPILE_LANGUAGE:ASM>>:${def}>`) ;
+                } else {
+                    lines.push(`    ${def}`) ;
+                }
+            }
+            for (const def of debugOnlyDefines) {
+                if (def.includes('=')) {
+                    lines.push(`    $<$<AND:$<CONFIG:Debug>,$<NOT:$<COMPILE_LANGUAGE:ASM>>>:${safeGenexDef(def)}>`) ;
+                } else if (isArm) {
+                    lines.push(`    $<$<AND:$<CONFIG:Debug>,$<NOT:$<COMPILE_LANGUAGE:ASM>>>:${def}>`) ;
+                } else {
+                    lines.push(`    $<$<CONFIG:Debug>:${def}>`) ;
+                }
+            }
+            for (const def of releaseOnlyDefines) {
+                if (def.includes('=')) {
+                    lines.push(`    $<$<AND:$<CONFIG:Release>,$<NOT:$<COMPILE_LANGUAGE:ASM>>>:${safeGenexDef(def)}>`) ;
+                } else if (def === 'NDEBUG') {
+                    if (!isIar) {
+                        // IAR: CMake automatically adds -DNDEBUG for Release builds.
+                        lines.push(isArm
+                            ? `    $<$<AND:$<CONFIG:Release>,$<NOT:$<COMPILE_LANGUAGE:ASM>>>:NDEBUG>`
+                            : `    $<$<CONFIG:Release>:NDEBUG>`) ;
+                    }
+                } else if (isArm) {
+                    lines.push(`    $<$<AND:$<CONFIG:Release>,$<NOT:$<COMPILE_LANGUAGE:ASM>>>:${def}>`) ;
+                } else {
+                    lines.push(`    $<$<CONFIG:Release>:${def}>`) ;
+                }
+            }
+            lines.push(')') ;
+            lines.push('') ;
+        }
+
+        if (fbc) {
+            // --- Compile options ---
+            const langDefs: Array<{ lang: string ; flags: ConfigFlagSet }> = [
+                { lang: 'C',   flags: fbc.c },
+                { lang: 'ASM', flags: fbc.asm },
+                { lang: 'CXX', flags: fbc.cxx },
+            ] ;
+            const compileLines: string[] = [] ;
+            for (const { lang, flags } of langDefs) {
+                const { common, debugOnly, releaseOnly } = splitByConfig(flags) ;
+                for (const f of common) {
+                    // armasm does not support -D or -I; skip these flags for ARM ASM.
+                    if (isArm && lang === 'ASM' && (f.startsWith('-D') || f.startsWith('-I'))) continue ;
+                    // Deduplicate -D flags already emitted by add_compile_definitions above.
+                    // A "common" flag is present in both Debug and Release, so it would be
+                    // emitted unconditionally.  If add_compile_definitions already covers it
+                    // for one or both configs, restrict (or drop) the entry accordingly.
+                    if (f.startsWith('-D')) {
+                        const name = flagDefName(f) ;
+                        const inDbg = debugDefineNames.has(name) ;
+                        const inRel = releaseDefineNames.has(name) ;
+                        if (inDbg && inRel) continue ; // fully covered — drop entirely
+                        if (inDbg) {
+                            compileLines.push(`    $<$<AND:$<COMPILE_LANGUAGE:${lang}>,$<CONFIG:Release>>:${f}>`) ;
+                            continue ;
+                        }
+                        if (inRel) {
+                            compileLines.push(`    $<$<AND:$<COMPILE_LANGUAGE:${lang}>,$<CONFIG:Debug>>:${f}>`) ;
+                            continue ;
+                        }
+                    }
+                    compileLines.push(`    $<$<COMPILE_LANGUAGE:${lang}>:${f}>`) ;
+                }
+                for (const f of debugOnly) {
+                    if (isArm && lang === 'ASM' && (f.startsWith('-D') || f.startsWith('-I'))) continue ;
+                    if (f.startsWith('-D') && debugDefineNames.has(flagDefName(f))) continue ;
+                    compileLines.push(`    $<$<AND:$<COMPILE_LANGUAGE:${lang}>,$<CONFIG:Debug>>:${f}>`) ;
+                }
+                for (const f of releaseOnly) {
+                    if (isArm && lang === 'ASM' && (f.startsWith('-D') || f.startsWith('-I'))) continue ;
+                    if (f.startsWith('-D') && releaseDefineNames.has(flagDefName(f))) continue ;
+                    compileLines.push(`    $<$<AND:$<COMPILE_LANGUAGE:${lang}>,$<CONFIG:Release>>:${f}>`) ;
+                }
+            }
+
+            const { common: lc, debugOnly: ld, releaseOnly: lr } = splitByConfig(fbc.link) ;
+            const linkLines: string[] = [] ;
+            for (const f of lc) linkLines.push(`    ${f}`) ;
+            for (const f of ld) linkLines.push(`    $<$<CONFIG:Debug>:${f}>`) ;
+            for (const f of lr) linkLines.push(`    $<$<CONFIG:Release>:${f}>`) ;
+
+            if (compileLines.length > 0) {
+                lines.push('add_compile_options(') ;
+                lines.push(...compileLines) ;
+                lines.push(')') ;
+            }
+            if (linkLines.length > 0) {
+                if (compileLines.length > 0) lines.push('') ;
+                lines.push('add_link_options(') ;
+                lines.push(...linkLines) ;
+                lines.push(')') ;
+            }
+        }
+        lines.push('') ;
+
+        const cmakePath = path.join(toolchainsDir, `${toolchain}.cmake`) ;
+        fs.writeFileSync(cmakePath, lines.join('\n')) ;
+    }
+}
+
+//
 // Generate projinfo.cmake inside a project directory.
-// This file contains the COMPONENT_* set statements for each component
-// active in the project, together with the corresponding
-// add_compile_definitions() call so preprocessor macros are also defined.
+// This file contains only COMPONENT_* set statements for each component
+// active in the project.  The corresponding add_compile_definitions() calls
+// are emitted by the project's CMakeLists.txt so that this file remains
+// a pure set-variable file with no side effects.
 // A project's CMakeLists.txt includes this file early so conditional source
 // and include-directory selection works correctly.
 //
@@ -2855,8 +2908,6 @@ export function generateProjInfoCMake(
     const TOOLCHAIN_COMPONENTS = new Set(['GCC_ARM', 'IAR', 'LLVM_ARM', 'ARM']) ;
     const lines: string[] = [] ;
 
-    // armasm does not accept -D flags; exclude all component defines for ARM ASM.
-    const armAsmNot = `$<NOT:$<AND:$<STREQUAL:\${MTBTOOLCHAIN},ARM>,$<COMPILE_LANGUAGE:ASM>>>` ;
     const sorted = [...components]
         .filter(c => !TOOLCHAIN_COMPONENTS.has(c))
         .sort() ;
@@ -2865,19 +2916,11 @@ export function generateProjInfoCMake(
             lines.push(`set(COMPONENT_${comp.replace(/-/g, '_')} 1)`) ;
         }
         lines.push('') ;
-        lines.push('add_compile_definitions(') ;
-        for (const comp of sorted) {
-            const name = `COMPONENT_${comp.replace(/-/g, '_')}` ;
-            lines.push(`    $<${armAsmNot}:${name}>`) ;
-        }
-        lines.push(')') ;
-        lines.push('') ;
     }
 
     // Toolchain component: set COMPONENT_<MTBTOOLCHAIN> at CMake configure time
     // so the correct toolchain-specific source directories are selected.
     lines.push('set(COMPONENT_${MTBTOOLCHAIN} 1)') ;
-    lines.push(`add_compile_definitions($<${armAsmNot}:COMPONENT_\${MTBTOOLCHAIN}>)`) ;
     lines.push('') ;
 
     const projinfoPath = path.join(destProjDir, 'projinfo.cmake') ;
@@ -3623,15 +3666,148 @@ export function generateVSCodeTasksJson(destDir: string) : void {
 }
 
 //
+// Paths to key ModusToolbox debug tools located on the host machine.
+//
+export interface ModusToolboxToolPaths {
+    // Directory that contains arm-none-eabi-gdb (and the other arm-none-eabi-* tools).
+    armToolchainPath: string ;
+    // Full path to the openocd executable, or just "openocd" when the tool
+    // could not be found and must be resolved via PATH.
+    openocdPath: string ;
+}
+
+//
+// Search for ModusToolbox-bundled debug tools (arm-none-eabi-gdb and openocd)
+// in standard installation directories on the current host platform.
+//
+// Search strategy (in priority order):
+//  1. MTB_TOOLS_DIR environment variable (set by the ModusToolbox IDE).
+//  2. Versioned tools_X.Y subdirectories under the standard ModusToolbox
+//     install bases; the highest version found is preferred.
+//  3. Well-known standalone package paths (Windows only: mtbgccpackage,
+//     mtbopenOCD).
+//  4. Bare executable name as last resort (assumes tool is available on PATH).
+//
+// All returned paths use forward slashes for cross-platform compatibility.
+//
+export function findModusToolboxTools() : ModusToolboxToolPaths {
+    const isWindows = process.platform === 'win32' ;
+    const isMac     = process.platform === 'darwin' ;
+    const home      = process.env['HOME'] ?? process.env['USERPROFILE'] ?? '' ;
+
+    const gdbExe = isWindows ? 'arm-none-eabi-gdb.exe' : 'arm-none-eabi-gdb' ;
+    const ocdExe = isWindows ? 'openocd.exe' : 'openocd' ;
+
+    // Normalise path separators to forward slashes.
+    const fwd = (p: string) => p.replace(/\\/g, '/') ;
+
+    // Test whether a file exists (not a directory).
+    const fileExists = (p: string) : boolean => {
+        try { return fs.statSync(p).isFile() ; }
+        catch { return false ; }
+    } ;
+
+    // Scan a directory for entries matching /^tools_\d+\.\d+/ and return the
+    // full path to the entry with the highest version, or undefined if none found.
+    const bestToolsDir = (searchBase: string) : string | undefined => {
+        const candidates : string[] = [] ;
+        try {
+            for (const entry of fs.readdirSync(searchBase)) {
+                if (/^tools_\d+\.\d+/.test(entry)) {
+                    candidates.push(path.join(searchBase, entry)) ;
+                }
+            }
+        } catch { /* directory not accessible */ }
+        if (candidates.length === 0) return undefined ;
+        // Sort descending using numeric-aware comparison so tools_3.10 > tools_3.9.
+        candidates.sort((a, b) => b.localeCompare(a, undefined, { numeric: true })) ;
+        return candidates[0] ;
+    } ;
+
+    // Standard ModusToolbox base directories per platform.  Each entry may
+    // itself be the ModusToolbox directory (contains tools_X.Y directly) or
+    // its parent (contains a ModusToolbox/ subdirectory).
+    const searchBases : string[] = [] ;
+
+    if (isWindows) {
+        // Modern installs land under C:\Infineon\ModusToolbox\tools_X.Y\
+        searchBases.push('C:/Infineon/ModusToolbox') ;
+        searchBases.push('C:/Program Files/Infineon/ModusToolbox') ;
+        // Older installs used C:\Infineon\tools_X.Y\ directly
+        searchBases.push('C:/Infineon') ;
+    } else if (isMac) {
+        searchBases.push(path.join(home, 'ModusToolbox')) ;
+        searchBases.push('/Applications/ModusToolbox') ;
+        searchBases.push('/opt/ModusToolbox') ;
+    } else {
+        // Linux
+        searchBases.push(path.join(home, 'ModusToolbox')) ;
+        searchBases.push('/opt/ModusToolbox') ;
+        searchBases.push('/usr/local/ModusToolbox') ;
+    }
+
+    // Ordered list of candidate gcc/bin directories and openocd executables.
+    const gccBinCandidates : string[] = [] ;
+    const ocdCandidates    : string[] = [] ;
+
+    // 1. MTB_TOOLS_DIR environment variable (highest priority)
+    const mtbToolsDir = process.env['MTB_TOOLS_DIR'] ;
+    if (mtbToolsDir) {
+        gccBinCandidates.push(path.join(mtbToolsDir, 'gcc', 'bin')) ;
+        ocdCandidates.push(path.join(mtbToolsDir, 'openocd', 'bin', ocdExe)) ;
+    }
+
+    // 2. Versioned tools_X.Y under standard bases
+    for (const base of searchBases) {
+        const best = bestToolsDir(base) ;
+        if (best) {
+            gccBinCandidates.push(path.join(best, 'gcc', 'bin')) ;
+            ocdCandidates.push(path.join(best, 'openocd', 'bin', ocdExe)) ;
+        }
+    }
+
+    // 3. Windows-only standalone packages (legacy or separately installed)
+    if (isWindows) {
+        gccBinCandidates.push('C:/Infineon/mtbgccpackage/gcc/bin') ;
+        ocdCandidates.push('C:/Infineon/mtbopenOCD/openocd/bin/openocd.exe') ;
+    }
+
+    // Resolve arm toolchain directory: pick the first candidate whose gdb binary exists.
+    const defaultGccBin = isWindows ? 'C:/Infineon/mtbgccpackage/gcc/bin' : '/usr/bin' ;
+    let armToolchainPath = defaultGccBin ;
+    for (const candidate of gccBinCandidates) {
+        if (fileExists(path.join(candidate, gdbExe))) {
+            armToolchainPath = candidate ;
+            break ;
+        }
+    }
+
+    // Resolve openocd executable: pick the first candidate that exists on disk.
+    let openocdPath = 'openocd' ; // last-resort: rely on PATH
+    for (const candidate of ocdCandidates) {
+        if (fileExists(candidate)) {
+            openocdPath = candidate ;
+            break ;
+        }
+    }
+
+    return {
+        armToolchainPath : fwd(armToolchainPath),
+        openocdPath      : fwd(openocdPath),
+    } ;
+}
+
+//
 // Generate .vscode/settings.json at destDir for a cmake-converted ModusToolbox
 // application.  Provides the cortex-debug extension settings needed to locate
 // the ARM toolchain, OpenOCD, and J-Link GDB server on each platform.
 //
 export function generateVSCodeSettingsJson(destDir: string) : void {
+    const tools = findModusToolboxTools() ;
+
     const requiredSettings = {
-        'cortex-debug.armToolchainPath':
-            'C:/Infineon/mtbgccpackage/gcc/bin',
-        'cortex-debug.openocdPath': 'openocd',
+        'cortex-debug.armToolchainPath': tools.armToolchainPath,
+        'cortex-debug.openocdPath': tools.openocdPath,
         'cortex-debug.JLinkGDBServerPath.windows':
             'C:/Program Files/SEGGER/JLink/JLinkGDBServerCL.exe',
         'cortex-debug.JLinkGDBServerPath.osx':
