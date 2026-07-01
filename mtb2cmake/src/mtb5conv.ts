@@ -902,27 +902,35 @@ export class MTB5Converter {
             return flags ;
         } ;
 
+        // Track whether 'make vscode' has already been run for one combination.
+        // Exactly one compiler/config combination uses 'make vscode' (a superset of
+        // codegen that also generates openocd.tcl); all others use 'make codegen'.
+        let vscodeMakeRan = false ;
+
         for (const toolchain of TOOLCHAINS) {
             let debugFlags:   ProjectFlagsByConfig | null = null ;
             let releaseFlags: ProjectFlagsByConfig | null = null ;
 
             for (const config of CONFIGS) {
-                this.logger_.info(`  Running: make codegen TOOLCHAIN=${toolchain} CONFIG=${config}`) ;
+                const makeTarget = vscodeMakeRan ? 'codegen' : 'vscode' ;
+                this.logger_.info(`  Running: make ${makeTarget} TOOLCHAIN=${toolchain} CONFIG=${config}`) ;
                 try {
                     const [code, output] = await MTBUtils.callMake(
                         this.logger_,
                         toolsDir,
                         modusShellDir,
                         srcProjDir,
-                        ['codegen', `TOOLCHAIN=${toolchain}`, `CONFIG=${config}`]
+                        [makeTarget, `TOOLCHAIN=${toolchain}`, `CONFIG=${config}`]
                     ) ;
                     if (code !== 0) {
-                        this.logger_.warn(`  make codegen TOOLCHAIN=${toolchain} CONFIG=${config} exited with code ${code}`) ;
+                        this.logger_.warn(`  make ${makeTarget} TOOLCHAIN=${toolchain} CONFIG=${config} exited with code ${code}`) ;
                         const firstLines = output.filter(l => l.trim().length > 0).slice(0, 5) ;
                         if (firstLines.length > 0) {
                             this.logger_.debug(`  output: ${firstLines.join(' | ')}`) ;
                         }
                     } else {
+                        // Mark that 'make vscode' has been run; remaining combinations use 'make codegen'.
+                        vscodeMakeRan = true ;
                         // Collect flags and defines immediately after each successful codegen so
                         // that a subsequent run cannot overwrite the files we need to read.
                         // This is critical for Model 2 (flat build/ layout) where all configs
@@ -944,7 +952,7 @@ export class MTB5Converter {
                         }
                     }
                 } catch (err: any) {
-                    this.logger_.warn(`  make codegen TOOLCHAIN=${toolchain} CONFIG=${config} failed: ${err.message}`) ;
+                    this.logger_.warn(`  make ${makeTarget} TOOLCHAIN=${toolchain} CONFIG=${config} failed: ${err.message}`) ;
                 }
             }
 

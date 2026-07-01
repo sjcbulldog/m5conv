@@ -2083,7 +2083,7 @@ function isStringValuedDefine(def: string): boolean {
 // For the three mbedtls config-file macros (listed in ANGLE_BRACKET_DEFINES)
 // the closing '>' is replaced with the CMake generator expression $<ANGLE-R>
 // so the angle-bracket form is preserved in the output
-// (e.g. MBEDTLS_CONFIG_FILE=<mbedtls/mbedtls_config.h$<ANGLE-R>>).
+// (e.g. MBEDTLS_CONFIG_FILE=<mbedtls/mbedtls_config.h$<ANGLE-R>).
 // For all other macros the angle-bracket value is converted to a
 // double-quoted string (e.g. NAME="value") which is equally valid for C/CXX.
 
@@ -2103,7 +2103,7 @@ function safeGenexDef(def: string): string {
     // Remove any trailing $<ANGLE-R> that might already be present.
     inner = inner.replace(/\$<ANGLE-R>$/, '') ;
     if (ANGLE_BRACKET_DEFINES.has(name)) {
-        return `${ab[1]}<${inner}$<ANGLE-R>>` ;
+        return `${ab[1]}<${inner}$<ANGLE-R>` ;
     }
     return `${ab[1]}"${inner}"` ;
 }
@@ -3357,9 +3357,9 @@ export function generateVSCodeLaunchJson(
 
     const combinedHexPath = '\${command:cmake.buildDirectory}/app_combined.hex' ;
 
-    function launchSearchDirs(projName: string) : string[] {
+    function launchSearchDirs(_projName: string) : string[] {
         const dirs = [
-            `\${workspaceFolder}/${projName}`,
+            '\${workspaceFolder}',
         ] ;
         if (bspName) {
             dirs.push(`\${workspaceFolder}/bsps/${bspName}/config/GeneratedSource`) ;
@@ -3367,9 +3367,9 @@ export function generateVSCodeLaunchJson(
         return dirs ;
     }
 
-    function attachSearchDirs(projName: string) : string[] {
+    function attachSearchDirs(_projName: string) : string[] {
         return [
-            `\${workspaceFolder}/${projName}`,
+            '\${workspaceFolder}',
         ] ;
     }
 
@@ -3724,6 +3724,43 @@ export function findModusToolboxTools() : ModusToolboxToolPaths {
         return candidates[0] ;
     } ;
 
+    // Scan a directory for entries whose name starts with the given prefix
+    // (case-insensitive) and return the full path to the entry with the highest
+    // version suffix, or undefined if none found.  Handles names like
+    // "ModusToolboxProgTools 1.0.0.1234" and "mtb-gcc-arm-eabi 11.3.0.567".
+    const bestPackageDir = (searchBase: string, prefix: string) : string | undefined => {
+        const lowerPrefix = prefix.toLowerCase() ;
+        const candidates : string[] = [] ;
+        try {
+            for (const entry of fs.readdirSync(searchBase)) {
+                if (entry.toLowerCase().startsWith(lowerPrefix)) {
+                    candidates.push(path.join(searchBase, entry)) ;
+                }
+            }
+        } catch { /* directory not accessible */ }
+        if (candidates.length === 0) return undefined ;
+        candidates.sort((a, b) => b.localeCompare(a, undefined, { numeric: true })) ;
+        return candidates[0] ;
+    } ;
+
+    // Scan a directory for subdirectories whose name looks like a version number
+    // (starts with a digit) and return the path to the highest-versioned one.
+    // This handles layouts where the package directory itself is unversioned but
+    // contains version subdirectories, e.g. "mtb-gcc-arm-eabi/14.2.1/".
+    const bestVersionedSubdir = (dir: string) : string | undefined => {
+        const candidates : string[] = [] ;
+        try {
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+                if (entry.isDirectory() && /^\d+\./.test(entry.name)) {
+                    candidates.push(path.join(dir, entry.name)) ;
+                }
+            }
+        } catch { /* directory not accessible */ }
+        if (candidates.length === 0) return undefined ;
+        candidates.sort((a, b) => b.localeCompare(a, undefined, { numeric: true })) ;
+        return candidates[0] ;
+    } ;
+
     // Standard ModusToolbox base directories per platform.  Each entry may
     // itself be the ModusToolbox directory (contains tools_X.Y directly) or
     // its parent (contains a ModusToolbox/ subdirectory).
@@ -3766,7 +3803,44 @@ export function findModusToolboxTools() : ModusToolboxToolPaths {
         }
     }
 
-    // 3. Windows-only standalone packages (legacy or separately installed)
+    // 3. Standalone Infineon/Tools package directories.
+    //    Two directory layouts are supported:
+    //      Layout A: version in the directory name
+    //        "ModusToolboxProgTools 1.0.0.1234/openocd/bin/openocd[.exe]"
+    //        "mtb-gcc-arm-eabi 11.3.0.567/bin/arm-none-eabi-gdb[.exe]"
+    //      Layout B: version as a subdirectory
+    //        "ModusToolboxProgTools/1.0.0.1234/openocd/bin/openocd[.exe]"
+    //        "mtb-gcc-arm-eabi/14.2.1/bin/arm-none-eabi-gdb[.exe]"
+    //    Both C:/Infineon/Tools and ~/Infineon/Tools are checked; the
+    //    highest-versioned match of each package prefix is preferred.
+    const infineonToolsBases : string[] = [
+        'C:/Infineon/Tools',
+        path.join(home, 'Infineon/Tools'),
+    ] ;
+    for (const base of infineonToolsBases) {
+        const bestGcc = bestPackageDir(base, 'mtb-gcc-arm-eabi') ;
+        if (bestGcc) {
+            // Layout A: version is embedded in the matched directory name
+            gccBinCandidates.push(path.join(bestGcc, 'bin')) ;
+            // Layout B: version is a subdirectory of the matched directory
+            const versionSubdir = bestVersionedSubdir(bestGcc) ;
+            if (versionSubdir) {
+                gccBinCandidates.push(path.join(versionSubdir, 'bin')) ;
+            }
+        }
+        const bestOcd = bestPackageDir(base, 'ModusToolboxProgTools') ;
+        if (bestOcd) {
+            // Layout A
+            ocdCandidates.push(path.join(bestOcd, 'openocd', 'bin', ocdExe)) ;
+            // Layout B
+            const versionSubdir = bestVersionedSubdir(bestOcd) ;
+            if (versionSubdir) {
+                ocdCandidates.push(path.join(versionSubdir, 'openocd', 'bin', ocdExe)) ;
+            }
+        }
+    }
+
+    // 4. Windows-only standalone packages (legacy or separately installed)
     if (isWindows) {
         gccBinCandidates.push('C:/Infineon/mtbgccpackage/gcc/bin') ;
         ocdCandidates.push('C:/Infineon/mtbopenOCD/openocd/bin/openocd.exe') ;

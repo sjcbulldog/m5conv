@@ -13,34 +13,13 @@
       "args": [
         "--force",
         "--input",
-        "C:/sdk4/mtb4",
+        "C:/mtb4/proj4",
         "--bsps",
-        "KIT_PSE84_EVAL_EPC2,KIT_PSE84_EVAL_EPC4,KIT_PSE84_AI",
+        "KIT_PSE84_EVAL_EPC2",
         "--output",
-        "C:/sdk4/sdk4"
+        "C:/mtb4/edge"
       ],
       "cwd": "${workspaceFolder}",
-      "skipFiles": [
-        "<node_internals>/**"
-      ],
-      "console": "integratedTerminal"
-    },
-    {
-      "name": "Debug CLI (dist)",
-      "type": "node",
-      "request": "launch",
-      "program": "${workspaceFolder}/dist/index.js",
-      "args": [
-        "--force",
-        "--input",
-        "C:/sdk4/mtb4",
-        "--bsps",
-        "KIT_PSE84_EVAL_EPC2,KIT_PSE84_EVAL_EPC4,KIT_PSE84_AI",
-        "--output",
-        "C:/sdk4/sdk4"
-      ],
-      "cwd": "${workspaceFolder}",
-      "preLaunchTask": "npm: build",
       "skipFiles": [
         "<node_internals>/**"
       ],
